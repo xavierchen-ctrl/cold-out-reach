@@ -82,7 +82,8 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
     if industry:
         eng_industry = INDUSTRY_MAP.get(industry, industry)
-        payload["organization_industry_tag_ids"] = [eng_industry]
+        # Apollo 用 q_organization_keyword_tags 傳產業文字（不是數字 ID）
+        payload["q_organization_keyword_tags"] = [eng_industry]
 
     companies_map: dict = {}
 
