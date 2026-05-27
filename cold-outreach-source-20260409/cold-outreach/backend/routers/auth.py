@@ -41,6 +41,30 @@ def logout(response: Response):
     return {"message": "logged out"}
 
 
+class SetupRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+
+@router.post("/setup")
+def setup_first_admin(body: SetupRequest, db: Session = Depends(get_db)):
+    """只在資料庫沒有任何使用者時，建立第一個 admin 帳號"""
+    if db.query(User).count() > 0:
+        raise HTTPException(status_code=403, detail="Setup already completed")
+    if not is_allowed_email(body.email):
+        raise HTTPException(status_code=403, detail="Email domain not allowed")
+    user = User(
+        name=body.name,
+        email=body.email.lower(),
+        hashed_password=hash_password(body.password),
+        role=UserRole.admin,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {"message": "Admin account created", "email": user.email}
+
+
 @router.get("/me", response_model=UserOut)
 def me(current_user: User = Depends(get_current_user)):
     return current_user
