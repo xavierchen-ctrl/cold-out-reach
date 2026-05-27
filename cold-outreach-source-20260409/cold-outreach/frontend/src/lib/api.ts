@@ -60,8 +60,8 @@ export const getGmailAuthUrl = () => api.get('/gmail/auth')
 export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/send', data)
 
 // ── AI ────────────────────────────────────────────────────────────────────────
-export const generateDraft = (lead_id: string, template_type: string) =>
-  api.post('/ai/draft', { lead_id, template_type })
+export const generateDraft = (lead_id: string, template_type: string, customer_background?: string) =>
+  api.post('/ai/draft', { lead_id, template_type, customer_background })
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 export const getStatsOverview = () => api.get('/stats/overview')

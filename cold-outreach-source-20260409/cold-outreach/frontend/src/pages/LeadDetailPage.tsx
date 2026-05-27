@@ -113,6 +113,7 @@ export default function LeadDetailPage() {
   const [emailTo, setEmailTo] = useState('')
   const [emailSubject, setEmailSubject] = useState('')
   const [emailBody, setEmailBody] = useState('')
+  const [customerBackground, setCustomerBackground] = useState('')
   const [draftTemplate, setDraftTemplate] = useState('intro')
   const [selectedTemplate, setSelectedTemplate] = useState('')
   const [generatingDraft, setGeneratingDraft] = useState(false)
@@ -302,7 +303,7 @@ export default function LeadDetailPage() {
     if (!id) return
     setGeneratingDraft(true)
     try {
-      const res = await generateDraft(id, draftTemplate)
+      const res = await generateDraft(id, draftTemplate, customerBackground || undefined)
       setEmailSubject(res.data.subject)
       setEmailBody(res.data.body)
     } catch (e: unknown) {
@@ -1443,6 +1444,22 @@ export default function LeadDetailPage() {
                 </Select>
               </div>
             )}
+
+            {/* 客戶背景資訊 */}
+            <div>
+              <Label className="flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-purple-500" />
+                客戶官網／背景資訊
+                <span className="text-xs text-muted-foreground font-normal">（貼上官網內容或背景說明，AI 會據此客製化信件）</span>
+              </Label>
+              <Textarea
+                value={customerBackground}
+                onChange={e => setCustomerBackground(e.target.value)}
+                placeholder="貼上客戶官網文字、產品介紹、公司簡介…AI 會根據這些資訊撰寫更有針對性的信件"
+                rows={4}
+                className="mt-1 text-sm"
+              />
+            </div>
 
             <div className="flex gap-2 items-end">
               <div className="flex-1">

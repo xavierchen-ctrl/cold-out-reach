@@ -38,6 +38,15 @@ def generate_draft(
 
     template_hint = TEMPLATES.get(body.template_type, TEMPLATES["intro"])
 
+    background_section = ""
+    if body.customer_background and body.customer_background.strip():
+        background_section = f"""
+客戶官網／背景資訊（請仔細閱讀並融入信件，讓內容更貼近客戶實際情況）：
+---
+{body.customer_background.strip()[:3000]}
+---
+"""
+
     prompt = f"""你是一位專業的數位行銷業務，正在撰寫開發信。
 
 目標客戶資訊：
@@ -46,11 +55,12 @@ def generate_draft(
 - 職稱：{lead.title or "（未知）"}
 - 產業：{lead.industry or "數位行銷"}
 - 城市：{lead.city or "台灣"}
-
+- 官網：{lead.website or "（未知）"}
+{background_section}
 信件類型：{body.template_type}
 指導方針：{template_hint}
 
-請用繁體中文撰寫一封專業的開發信。
+請用繁體中文撰寫一封專業的開發信。若有提供客戶背景資訊，請具體提及客戶的產品/服務，讓信件更有針對性，而非泛泛而談。
 回應格式（嚴格遵守）：
 SUBJECT: <信件主旨>
 BODY:

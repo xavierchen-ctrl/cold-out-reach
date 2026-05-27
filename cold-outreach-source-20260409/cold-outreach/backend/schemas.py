@@ -149,6 +149,7 @@ class SendEmailRequest(BaseModel):
 class DraftRequest(BaseModel):
     lead_id: UUID
     template_type: str  # intro / followup / proposal
+    customer_background: Optional[str] = None  # 客戶官網/背景資訊
 
 
 class DraftResponse(BaseModel):
