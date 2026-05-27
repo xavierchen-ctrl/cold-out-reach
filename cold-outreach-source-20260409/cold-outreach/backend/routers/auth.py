@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, UserRole
 from schemas import LoginRequest, UserOut
-from auth import verify_password, hash_password, create_access_token, get_current_user, is_allowed_email, require_admin
+from auth import verify_password, hash_password, validate_password, create_access_token, get_current_user, is_allowed_email, require_admin
 
 # HTTPS 環境（Railway/Vercel）啟用 secure cookie
 _COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
@@ -53,6 +53,10 @@ def setup_first_admin(body: SetupRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=403, detail="Setup already completed")
     if not is_allowed_email(body.email):
         raise HTTPException(status_code=403, detail="Email domain not allowed")
+    try:
+        validate_password(body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     user = User(
         name=body.name,
         email=body.email.lower(),
@@ -100,6 +104,10 @@ def create_user(
     existing = db.query(User).filter(User.email == body.email.lower()).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already exists")
+    try:
+        validate_password(body.password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     user = User(
         email=body.email.lower(),
         name=body.name,
@@ -127,6 +135,10 @@ def update_user(
     if body.role is not None:
         user.role = body.role
     if body.password is not None:
+        try:
+            validate_password(body.password)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         user.hashed_password = hash_password(body.password)
     db.commit()
     db.refresh(user)

@@ -445,6 +445,10 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
 
   const handleCreate = async () => {
     if (!form.name || !form.email || !form.password) return
+    if (form.password.length < 8 || !/[a-zA-Z]/.test(form.password) || !/[0-9]/.test(form.password)) {
+      alert('密碼需至少 8 碼，且必須包含英文字母與數字')
+      return
+    }
     setSaving(true)
     try {
       await createUser(form)
@@ -636,8 +640,16 @@ function ProfileTab() {
       setMsg('❌ 新密碼與確認密碼不符')
       return
     }
-    if (newPw.length < 6) {
-      setMsg('❌ 密碼至少需要 6 個字元')
+    if (newPw.length < 8) {
+      setMsg('❌ 密碼至少需要 8 個字元')
+      return
+    }
+    if (!/[a-zA-Z]/.test(newPw)) {
+      setMsg('❌ 密碼必須包含至少一個英文字母')
+      return
+    }
+    if (!/[0-9]/.test(newPw)) {
+      setMsg('❌ 密碼必須包含至少一個數字')
       return
     }
     setSaving(true)

@@ -24,6 +24,16 @@ def is_allowed_email(email: str) -> bool:
     return domain in ALLOWED_DOMAINS
 
 
+def validate_password(plain: str) -> None:
+    """密碼規則：至少 8 碼，且必須同時包含英文字母與數字。"""
+    if len(plain) < 8:
+        raise ValueError("密碼至少需要 8 個字元")
+    if not any(c.isalpha() for c in plain):
+        raise ValueError("密碼必須包含至少一個英文字母")
+    if not any(c.isdigit() for c in plain):
+        raise ValueError("密碼必須包含至少一個數字")
+
+
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
