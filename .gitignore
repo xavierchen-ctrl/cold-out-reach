@@ -1,0 +1,7 @@
+# Claude Code 工作記憶（本機專用，不提交）
+.claude/
+
+# 敏感設定檔
+**/.env
+**/*.env
+tmp/

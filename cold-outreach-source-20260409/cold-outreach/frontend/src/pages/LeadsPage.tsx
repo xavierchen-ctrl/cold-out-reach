@@ -1,0 +1,1263 @@
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  getLeads, createLead, updateLead, deleteLead, updateLeadStatus,
+  importCSV, getActivities, createActivity, getGmailAuthUrl, sendEmail, generateDraft,
+  runScraper, getScraperJobs, previewScraperJob, importScraperJob,
+  scoreLead, scoreBatch, bulkStatus, bulkDelete, getSequences, enrollSequence, enrichLushaPhone, enrichLushaStatus,
+  exportCsv, getUsers, getTags, addLeadTags, getICPs, batchAnalyzeSignals,
+} from '@/lib/api'
+import { useAuth } from '@/hooks/useAuth'
+import { Lead, LeadStatus, Activity, ScraperJob, User, Tag, ICPProfile, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, SCRAPER_SOURCES, SCRAPER_DEFAULT_URLS, ACTIVITY_LABELS } from '@/types'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Plus, Upload, Search, Trash2, Mail, Sparkles, RefreshCw, Download, Eye, Star, CheckSquare, LayoutGrid, Table2, SlidersHorizontal, Building2 } from 'lucide-react'
+import KanbanView from '@/components/KanbanView'
+import AdvancedFilterSidebar, { FilterChips, FilterState, EMPTY_FILTER, applyFilter } from '@/components/AdvancedFilterSidebar'
+
+function ScoreBadge({ score }: { score: number | null }) {
+  if (score === null) return <span className="text-xs text-muted-foreground">—</span>
+  const color = score >= 80 ? 'bg-green-100 text-green-700' : score >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'
+  return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>{score}</span>
+}
+
+// Tabs vary by role: sales cannot see scraper tab
+function getAvailableTabs(role?: string) {
+  if (role === 'sales') return ['手動管理', 'CSV 匯入'] as const
+  return ['手動管理', 'CSV 匯入', '會展爬取'] as const
+}
+type Tab = '手動管理' | 'CSV 匯入' | '會展爬取'
+
+const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string][]
+const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
+
+// ── Status Badge ──────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: LeadStatus }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${LEAD_STATUS_COLORS[status]}`}>
+      {LEAD_STATUS_LABELS[status]}
+    </span>
+  )
+}
+
+// ── Lead Detail Panel ─────────────────────────────────────────────────────────
+function LeadDetail({
+  lead,
+  onClose,
+  onUpdated,
+}: {
+  lead: Lead
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const { user } = useAuth()
+  const [form, setForm] = useState({ ...lead })
+  const [activities, setActivities] = useState<Activity[]>([])
+  const [saving, setSaving] = useState(false)
+  const [showEmail, setShowEmail] = useState(false)
+  const [emailTo, setEmailTo] = useState(lead.email || '')
+  const [emailSubject, setEmailSubject] = useState('')
+  const [emailBody, setEmailBody] = useState('')
+  const [draftTemplate, setDraftTemplate] = useState('intro')
+  const [generatingDraft, setGeneratingDraft] = useState(false)
+  const [sendingEmail, setSendingEmail] = useState(false)
+  const [noteContent, setNoteContent] = useState('')
+
+  const loadActivities = useCallback(async () => {
+    const res = await getActivities(lead.id)
+    setActivities(res.data)
+  }, [lead.id])
+
+  useEffect(() => { loadActivities() }, [loadActivities])
+
+  const save = async () => {
+    setSaving(true)
+    try {
+      await updateLead(lead.id, form)
+      onUpdated()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const changeStatus = async (status: LeadStatus) => {
+    await updateLeadStatus(lead.id, status)
+    setForm(f => ({ ...f, status }))
+    onUpdated()
+    loadActivities()
+  }
+
+  const handleDraft = async () => {
+    setGeneratingDraft(true)
+    try {
+      const res = await generateDraft(lead.id, draftTemplate)
+      setEmailSubject(res.data.subject)
+      setEmailBody(res.data.body)
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(msg || 'AI 草稿失敗')
+    } finally {
+      setGeneratingDraft(false)
+    }
+  }
+
+  const handleSendEmail = async () => {
+    setSendingEmail(true)
+    try {
+      await sendEmail({ lead_id: lead.id, to: emailTo, subject: emailSubject, body: emailBody })
+      setShowEmail(false)
+      loadActivities()
+      alert('郵件已送出')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      const msg = err?.response?.data?.detail || ''
+      if (msg.includes('Gmail not connected')) {
+        const authRes = await getGmailAuthUrl()
+        window.open(authRes.data.auth_url, '_blank')
+      } else {
+        alert(msg || '發送失敗')
+      }
+    } finally {
+      setSendingEmail(false)
+    }
+  }
+
+  const addNote = async () => {
+    if (!noteContent.trim()) return
+    await createActivity(lead.id, { type: 'call_note', content: noteContent })
+    setNoteContent('')
+    loadActivities()
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 flex">
+      <div className="flex-1 bg-black/30" onClick={onClose} />
+      <div className="w-[560px] bg-white shadow-xl overflow-y-auto flex flex-col">
+        <div className="px-6 py-4 border-b flex items-center justify-between">
+          <div>
+            <h2 className="font-semibold text-lg">{lead.company_name}</h2>
+            <p className="text-sm text-muted-foreground">{lead.contact_name} {lead.title && `· ${lead.title}`}</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-xl">✕</button>
+        </div>
+
+        <div className="px-6 py-4 border-b">
+          <p className="text-xs font-medium text-muted-foreground mb-2">Pipeline</p>
+          <div className="flex gap-1 flex-wrap">
+            {PIPELINE.map(s => (
+              <button
+                key={s}
+                onClick={() => changeStatus(s)}
+                className={`px-2 py-1 rounded text-xs font-medium border transition-colors ${form.status === s ? 'bg-primary text-primary-foreground border-primary' : 'border-input hover:bg-muted'}`}
+              >
+                {LEAD_STATUS_LABELS[s]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 space-y-3 border-b">
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: '公司', key: 'company_name' },
+              { label: '聯絡人', key: 'contact_name' },
+              { label: '職稱', key: 'title' },
+              { label: 'Email', key: 'email' },
+              { label: '電話', key: 'phone' },
+              { label: '統一編號', key: 'tax_id' },
+              { label: '資本額', key: 'capital_amount' },
+              { label: '產業', key: 'industry' },
+              { label: '城市', key: 'city' },
+              { label: '公司規模', key: 'company_size' },
+            ].map(({ label, key }) => (
+              <div key={key}>
+                <Label className="text-xs">{label}</Label>
+                <Input
+                  value={(form as Record<string, unknown>)[key] as string || ''}
+                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  className="h-8 text-sm mt-0.5"
+                />
+              </div>
+            ))}
+          </div>
+          {/* 官方網址欄位 (全寬) */}
+          <div>
+            <Label className="text-xs">官方網址</Label>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Input
+                value={form.website || ''}
+                onChange={e => setForm(f => ({ ...f, website: e.target.value }))}
+                className="h-8 text-sm flex-1"
+                placeholder="https://"
+              />
+              {form.website && (
+                <a
+                  href={form.website.startsWith('http') ? form.website : `https://${form.website}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-xs text-blue-500 hover:underline whitespace-nowrap shrink-0"
+                  onClick={e => e.stopPropagation()}
+                >
+                  開啟 ↗
+                </a>
+              )}
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">備注</Label>
+            <Textarea
+              value={form.notes || ''}
+              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+              className="text-sm mt-0.5"
+              rows={2}
+            />
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button size="sm" onClick={save} disabled={saving}>{saving ? '儲存中...' : '儲存'}</Button>
+            <Button size="sm" variant="outline" onClick={() => setShowEmail(true)}>
+              <Mail className="w-3.5 h-3.5 mr-1.5" /> 發信
+            </Button>
+            <Button size="sm" variant="outline" onClick={async () => {
+              await scoreLead(lead.id)
+              onUpdated()
+            }}>
+              <Star className="w-3.5 h-3.5 mr-1.5" /> 評分
+            </Button>
+          </div>
+          {lead.score !== null && (
+            <div className="mt-2 p-2 bg-muted rounded text-xs">
+              <span className="font-medium">評分：</span>
+              <ScoreBadge score={lead.score} />
+              {lead.score_reason && <span className="ml-2 text-muted-foreground">{lead.score_reason}</span>}
+            </div>
+          )}
+        </div>
+
+        {/* Activity timeline */}
+        <div className="px-6 py-4 flex-1">
+          <p className="text-xs font-medium text-muted-foreground mb-3">活動記錄</p>
+          <div className="flex gap-2 mb-4">
+            <Textarea
+              placeholder="新增通話/會議備注..."
+              value={noteContent}
+              onChange={e => setNoteContent(e.target.value)}
+              className="text-sm"
+              rows={2}
+            />
+            <Button size="sm" onClick={addNote} className="self-end">新增</Button>
+          </div>
+          <div className="space-y-3">
+            {activities.map(act => (
+              <div key={act.id} className="flex gap-3">
+                <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 shrink-0" />
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-medium">{ACTIVITY_LABELS[act.type]}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {new Date(act.created_at).toLocaleString('zh-TW')}
+                    </span>
+                  </div>
+                  {act.content && <p className="text-sm text-gray-700 mt-0.5 whitespace-pre-wrap">{act.content}</p>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Email Modal */}
+      <Dialog open={showEmail} onOpenChange={setShowEmail}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader><DialogTitle>發送郵件</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>收件人</Label>
+              <Input value={emailTo} onChange={e => setEmailTo(e.target.value)} />
+            </div>
+            <div className="flex gap-2 items-end">
+              <div className="flex-1">
+                <Label>AI 草稿類型</Label>
+                <Select value={draftTemplate} onValueChange={setDraftTemplate}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="intro">初次開發</SelectItem>
+                    <SelectItem value="followup">追蹤跟進</SelectItem>
+                    <SelectItem value="proposal">報價提案</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button variant="outline" size="sm" onClick={handleDraft} disabled={generatingDraft}>
+                <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                {generatingDraft ? '生成中...' : 'AI 草稿'}
+              </Button>
+            </div>
+            <div>
+              <Label>主旨</Label>
+              <Input value={emailSubject} onChange={e => setEmailSubject(e.target.value)} />
+            </div>
+            <div>
+              <Label>內文</Label>
+              <Textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={8} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setShowEmail(false)}>取消</Button>
+              <Button onClick={handleSendEmail} disabled={sendingEmail}>
+                {sendingEmail ? '發送中...' : '發送'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ── Create Lead Modal ─────────────────────────────────────────────────────────
+function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [form, setForm] = useState({ company_name: '', contact_name: '', title: '', email: '', phone: '', industry: '', city: '', source: '' })
+  const [saving, setSaving] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    try {
+      await createLead(form)
+      onCreated()
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>新增名單</DialogTitle></DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <div>
+            <Label>公司名稱 *</Label>
+            <Input value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} required />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: '聯絡人', key: 'contact_name' },
+              { label: '職稱', key: 'title' },
+              { label: 'Email', key: 'email' },
+              { label: '電話', key: 'phone' },
+              { label: '產業', key: 'industry' },
+              { label: '城市', key: 'city' },
+            ].map(({ label, key }) => (
+              <div key={key}>
+                <Label>{label}</Label>
+                <Input
+                  value={(form as Record<string, unknown>)[key] as string || ''}
+                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  className="h-8 text-sm"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={onClose}>取消</Button>
+            <Button type="submit" disabled={saving}>{saving ? '新增中...' : '新增'}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ── CSV Import Tab ────────────────────────────────────────────────────────────
+function CsvImportTab({ onImported }: { onImported: () => void }) {
+  const [file, setFile] = useState<File | null>(null)
+  const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null)
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleImport = async () => {
+    if (!file) return
+    setLoading(true)
+    try {
+      const res = await importCSV(file)
+      setResult(res.data)
+      onImported()
+    } catch (e: unknown) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '匯入失敗')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="max-w-lg">
+      <p className="text-sm text-muted-foreground mb-4">
+        支援欄位：company_name（必填）、contact_name、title、email、phone、industry、city、company_size、source
+      </p>
+      <div
+        className="border-2 border-dashed border-input rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors"
+        onClick={() => inputRef.current?.click()}
+      >
+        <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+        <p className="text-sm font-medium">{file ? file.name : '點擊選擇 CSV 檔案'}</p>
+        <p className="text-xs text-muted-foreground mt-1">或拖曳至此</p>
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv"
+          className="hidden"
+          onChange={e => setFile(e.target.files?.[0] || null)}
+        />
+      </div>
+      {file && (
+        <Button className="mt-4 w-full" onClick={handleImport} disabled={loading}>
+          {loading ? '匯入中...' : '開始匯入'}
+        </Button>
+      )}
+      {result && (
+        <div className="mt-4 p-4 rounded-lg bg-muted text-sm">
+          <p className="font-medium">✅ 匯入完成：新增 {result.created} 筆</p>
+          {result.errors.length > 0 && (
+            <div className="mt-2">
+              <p className="text-destructive font-medium">錯誤 {result.errors.length} 筆：</p>
+              <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-0.5 mt-1">
+                {result.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Scraper Tab ───────────────────────────────────────────────────────────────
+const SCRAPER_SOURCE_ICONS: Record<string, string> = {
+  apollo: '⭐',
+  lusha: '📞',
+  job_104: '💼',
+  job_1111: '📋',
+  real_estate_591: '🏠',
+  custom_url: '🔗',
+}
+
+function ScraperTab({ onImported }: { onImported: () => void }) {
+  const [source, setSource] = useState('taitra')
+  const [url, setUrl] = useState(SCRAPER_DEFAULT_URLS['taitra'])
+  const [keyword, setKeyword] = useState('')
+  const [industry, setIndustry] = useState('')
+  const [limit, setLimit] = useState(10)
+  const [icps, setIcps] = useState<ICPProfile[]>([])
+  const [jobs, setJobs] = useState<ScraperJob[]>([])
+  const [running, setRunning] = useState(false)
+  const navigate = useNavigate()
+
+  const loadJobs = useCallback(async () => {
+    const res = await getScraperJobs()
+    setJobs(res.data)
+  }, [])
+
+  useEffect(() => { loadJobs() }, [loadJobs])
+  useEffect(() => { getICPs().then(r => setIcps(r.data)).catch(() => {}) }, [])
+
+  // Poll for running jobs
+  useEffect(() => {
+    const hasRunning = jobs.some(j => j.status === 'pending' || j.status === 'running')
+    if (!hasRunning) return
+    const timer = setInterval(loadJobs, 3000)
+    return () => clearInterval(timer)
+  }, [jobs, loadJobs])
+
+  const handleRun = async () => {
+    setRunning(true)
+    try {
+      const res = await runScraper(
+        source,
+        url !== SCRAPER_DEFAULT_URLS[source] ? url : undefined,
+        keyword || undefined,
+        (industry === 'all' ? '' : industry) || undefined,
+        limit
+      )
+      // 爬蟲同步完成後，直接進入檢視頁面
+      await loadJobs()
+      if (res?.data?.id && res?.data?.status === 'done') {
+        navigate('/scraper/' + res.data.id)
+      }
+    } finally {
+      setRunning(false)
+    }
+  }
+
+  const handlePreview = (jobId: string) => {
+    navigate('/scraper/' + jobId)
+  }
+
+  const handleImport = async (jobId: string) => {
+    const res = await importScraperJob(jobId)
+    alert(`✅ 匯入完成：新增 ${res.data.created} 筆，跳過重複 ${res.data.skipped} 筆`)
+    onImported()
+  }
+
+  const statusColor: Record<string, string> = {
+    pending: 'bg-gray-100 text-gray-600',
+    running: 'bg-blue-100 text-blue-600',
+    done: 'bg-green-100 text-green-700',
+    failed: 'bg-red-100 text-red-700',
+  }
+  const statusLabel: Record<string, string> = { pending: '等待中', running: '爬取中', done: '完成', failed: '失敗' }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      {/* Run form */}
+      <div className="bg-white border rounded-lg p-5 space-y-4">
+        <h3 className="font-medium text-sm">新增爬取任務</h3>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <Label>資料來源</Label>
+            <Select
+              value={source}
+              onValueChange={v => {
+                setSource(v)
+                setUrl(SCRAPER_DEFAULT_URLS[v])
+              }}
+            >
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(SCRAPER_SOURCES).map(([k, v]) => (
+                  <SelectItem key={k} value={k}>
+                    <span className="flex items-center gap-2">
+                      <span>{SCRAPER_SOURCE_ICONS[k] ?? '🔍'}</span>
+                      <span>{v}</span>
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>目標 URL</Label>
+            <Input
+              value={url}
+              onChange={e => setUrl(e.target.value)}
+              className="mt-1 text-xs"
+              placeholder={source === 'custom_url' ? 'https://www.computex.biz/exhibitors' : ''}
+            />
+            {source === 'custom_url' && (
+              <p className="text-xs text-muted-foreground mt-1">請輸入目標網頁 URL（如會展官網、公會名單），AI 自動提取公司名單</p>
+            )}
+          </div>
+          <div>
+            <Label>關鍵字 <span className="text-muted-foreground font-normal">（自訂搜尋詞）</span></Label>
+            <Input
+              value={keyword}
+              onChange={e => setKeyword(e.target.value)}
+              placeholder={source === 'lusha' ? '例：benq.com, 91app.com（domain）或 BenQ, 誠品（公司名）' : source === 'custom_url' ? '篩選關鍵字（可空白）' : '例：電商、品牌行銷、SEO'}
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label>產業標籤 <span className="text-muted-foreground font-normal">（覆蓋爬取到的產業）</span></Label>
+            <Select value={industry} onValueChange={setIndustry}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="選擇產業（可空白）" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部產業</SelectItem>
+                <SelectItem value="數位行銷">數位行銷</SelectItem>
+                <SelectItem value="廣告">廣告代理商</SelectItem>
+                <SelectItem value="電商">電商</SelectItem>
+                <SelectItem value="零售">零售</SelectItem>
+                <SelectItem value="品牌">品牌消費品</SelectItem>
+                <SelectItem value="科技">科技 / IT</SelectItem>
+                <SelectItem value="媒體">媒體 / 出版</SelectItem>
+                <SelectItem value="金融">金融 / 保險</SelectItem>
+                <SelectItem value="製造">製造業</SelectItem>
+                <SelectItem value="餐飲">餐飲 / 食品</SelectItem>
+                <SelectItem value="醫療">醫療 / 健康</SelectItem>
+                <SelectItem value="教育">教育</SelectItem>
+                <SelectItem value="房地產">房地產</SelectItem>
+                <SelectItem value="旅遊">旅遊 / 飯店</SelectItem>
+                <SelectItem value="物流">物流 / 供應鏈</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label>最多筆數</Label>
+            <Select value={String(limit)} onValueChange={v => setLimit(Number(v))}>
+              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="5">5 筆</SelectItem>
+                <SelectItem value="10">10 筆</SelectItem>
+                <SelectItem value="20">20 筆</SelectItem>
+                <SelectItem value="50">50 筆</SelectItem>
+                <SelectItem value="100">100 筆</SelectItem>
+                <SelectItem value="200">200 筆</SelectItem>
+                <SelectItem value="500">500 筆</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {icps.length > 0 && (
+            <div className="col-span-2">
+              <Label>套用 ICP <span className="text-muted-foreground font-normal">（自動填入條件）</span></Label>
+              <Select onValueChange={icpId => {
+                const icp = icps.find(i => i.id === icpId)
+                if (!icp) return
+                if (icp.industries.length > 0) setIndustry(icp.industries[0])
+                if (icp.titles.length > 0) setKeyword(icp.titles.join('、'))
+              }}>
+                <SelectTrigger className="mt-1">
+                  <SelectValue placeholder="選擇 ICP 套用（可選）" />
+                </SelectTrigger>
+                <SelectContent>
+                  {icps.map(icp => (
+                    <SelectItem key={icp.id} value={icp.id}>{icp.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </div>
+        <Button onClick={handleRun} disabled={running}>
+          <RefreshCw className={`w-4 h-4 mr-2 ${running ? 'animate-spin' : ''}`} />
+          {running ? '啟動中...' : '開始爬取'}
+        </Button>
+      </div>
+
+      {/* Jobs list */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="font-medium text-sm">任務記錄</h3>
+          <Button variant="ghost" size="sm" onClick={loadJobs}><RefreshCw className="w-3.5 h-3.5" /></Button>
+        </div>
+        {jobs.length === 0 ? (
+          <p className="text-sm text-muted-foreground">尚無任務</p>
+        ) : (
+          <div className="space-y-2">
+            {jobs.map(job => (
+              <div key={job.id} className="bg-white border rounded-lg p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[job.status]}`}>
+                    {job.status === 'running' && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse mr-1.5" />}
+                    {statusLabel[job.status]}
+                  </span>
+                  <div>
+                    <p className="text-sm font-medium">{SCRAPER_SOURCE_ICONS[job.source] ?? '🔍'} {SCRAPER_SOURCES[job.source] || job.source}</p>
+                    <p className="text-xs text-muted-foreground">{new Date(job.created_at).toLocaleString('zh-TW')}</p>
+                  </div>
+                  {job.count != null && (
+                    <span className="text-xs text-muted-foreground">{job.count} 筆</span>
+                  )}
+                  {job.error_msg && (
+                    <span className="text-xs text-destructive">{job.error_msg.slice(0, 60)}</span>
+                  )}
+                </div>
+                {job.status === 'done' && (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => handlePreview(job.id)}>
+                      <Eye className="w-3.5 h-3.5 mr-1" /> 預覽
+                    </Button>
+                    <Button size="sm" onClick={() => handleImport(job.id)}>
+                      <Download className="w-3.5 h-3.5 mr-1" /> 匯入名單
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+
+    </div>
+  )
+}
+
+// ── Company View ──────────────────────────────────────────────────────────────
+function CompanyView({ leads, onSelect }: { leads: Lead[]; onSelect: (lead: Lead) => void }) {
+  // Group by company_name
+  const groups = leads.reduce<Record<string, Lead[]>>((acc, lead) => {
+    const key = lead.company_name || '未知公司'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(lead)
+    return acc
+  }, {})
+
+  const companies = Object.entries(groups).map(([name, members]) => {
+    const maxScore = Math.max(...members.map(m => m.score ?? 0))
+    const lastInteraction = members
+      .map(m => m.updated_at)
+      .sort()
+      .reverse()[0]
+    return { name, members, maxScore, lastInteraction }
+  }).sort((a, b) => b.maxScore - a.maxScore)
+
+  if (companies.length === 0) {
+    return (
+      <div className="text-center py-16 text-muted-foreground mt-4">
+        <Building2 className="w-12 h-12 mx-auto mb-3 opacity-30" />
+        <p className="text-lg">尚無公司資料</p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
+      {companies.map(({ name, members, maxScore, lastInteraction }) => (
+        <div key={name} className="bg-white border rounded-xl p-4 hover:shadow-md transition-shadow">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Building2 className="w-4 h-4 text-muted-foreground" />
+              <h3 className="font-semibold text-sm">{name}</h3>
+            </div>
+            {maxScore > 0 && (
+              <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${maxScore >= 80 ? 'bg-green-100 text-green-700' : maxScore >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'}`}>
+                最高 {maxScore}
+              </span>
+            )}
+          </div>
+          <div className="space-y-1.5 mb-3">
+            {members.map(m => (
+              <div
+                key={m.id}
+                onClick={() => onSelect(m)}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted/50 cursor-pointer text-sm"
+              >
+                <span className={`w-2 h-2 rounded-full flex-shrink-0 ${LEAD_STATUS_COLORS[m.status].split(' ')[0].replace('bg-', 'bg-').replace('-100', '-400')}`} />
+                <span className="flex-1 truncate">{m.contact_name || '(無聯絡人)'}</span>
+                {m.title && <span className="text-xs text-muted-foreground">{m.title}</span>}
+                <span className={`text-xs px-1.5 py-0.5 rounded-full ${LEAD_STATUS_COLORS[m.status]}`}>
+                  {LEAD_STATUS_LABELS[m.status]}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center justify-between text-xs text-muted-foreground pt-2 border-t">
+            <span>{members.length} 位聯絡人</span>
+            <span>最近互動：{new Date(lastInteraction).toLocaleDateString('zh-TW')}</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+export default function LeadsPage() {
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const { user } = useAuth()
+  const TABS = getAvailableTabs(user?.role)
+  const initTab = (searchParams.get('tab') as Tab | null)
+  const [activeTab, setActiveTab] = useState<Tab>(
+    initTab && (TABS as readonly string[]).includes(initTab) ? initTab : '手動管理'
+  )
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const [scoringAll, setScoringAll] = useState(false)
+  const [sequences, setSequences] = useState<any[]>([])
+  const [viewMode, setViewMode] = useState<'table' | 'kanban' | 'company'>('table')
+  const [showFilterSidebar, setShowFilterSidebar] = useState(false)
+  const [advFilter, setAdvFilter] = useState<FilterState>(EMPTY_FILTER)
+  const [allUsers, setAllUsers] = useState<User[]>([])
+  const [allTags, setAllTags] = useState<Tag[]>([])
+  const [showBulkTagModal, setShowBulkTagModal] = useState(false)
+
+  const [sortContact, setSortContact] = useState(false)  // 預設關閉：讓最新匯入的名單排在最上面，避免被擠到後面
+
+  const loadLeads = useCallback(async () => {
+    setLoading(true)
+    try {
+      const params: Record<string, string> = {}
+      if (search) params.search = search
+      if (filterStatus !== 'all') params.status = filterStatus
+      if (advFilter.tags && advFilter.tags.length > 0) params.tags = advFilter.tags.join(',')
+      if (sortContact) params.sort = 'contact_first'
+      const res = await getLeads(params)
+      setLeads(res.data)
+    } finally {
+      setLoading(false)
+    }
+  }, [search, filterStatus, advFilter.tags, sortContact])
+
+  useEffect(() => { loadLeads() }, [loadLeads])
+  useEffect(() => {
+    getSequences().then(r => setSequences(r.data)).catch(() => {})
+    getUsers().then(r => setAllUsers(r.data)).catch(() => {})
+    getTags().then(r => setAllTags(r.data)).catch(() => {})
+  }, [])
+
+  const handleDelete = async (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('確定刪除這筆名單？')) return
+    await deleteLead(id)
+    loadLeads()
+  }
+
+  const toggleCheck = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setChecked(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+  const toggleAll = () => {
+    setChecked(prev => prev.size === leads.length ? new Set() : new Set(leads.map(l => l.id)))
+  }
+  const clearChecked = () => setChecked(new Set())
+
+  const handleBulkStatus = async (status: LeadStatus) => {
+    await bulkStatus([...checked], status)
+    clearChecked(); loadLeads()
+  }
+  const handleBulkDelete = async () => {
+    if (!confirm(`確定刪除選取的 ${checked.size} 筆名單？`)) return
+    await bulkDelete([...checked])
+    clearChecked(); loadLeads()
+  }
+  const handleBulkScore = async () => {
+    setScoringAll(true)
+    try { await scoreBatch([...checked]); loadLeads() }
+    finally { setScoringAll(false) }
+  }
+  const [enriching, setEnriching] = useState(false)
+  const [enrichMsg, setEnrichMsg] = useState('')
+  const [analyzingAll, setAnalyzingAll] = useState(false)
+  const handleLushaEnrich = async () => {
+    setEnriching(true)
+    setEnrichMsg('啟動中...')
+    try {
+      const ids = checked.size > 0 ? [...checked] : undefined
+      const limit = checked.size > 0 ? checked.size : 20
+      const res = await enrichLushaPhone(ids as string[] | undefined, limit)
+      const jobId = res.data.job_id
+      setEnrichMsg(`執行中（每筆約 12 秒）...`)
+      // Polling
+      const poll = async () => {
+        const s = await enrichLushaStatus(jobId)
+        const { status, enriched, skipped, failed, total, progress } = s.data
+        setEnrichMsg(`進度 ${progress}/${total}：已補 ${enriched} 筆電話`)
+        if (status === 'done') {
+          setEnriching(false)
+          setEnrichMsg('')
+          alert(`✅ Lusha 補電話完成：${enriched} 筆補到電話，${skipped} 筆查無資料，${failed} 筆 API 錯誤`)
+          loadLeads()
+          clearChecked()
+        } else if (status === 'failed') {
+          setEnriching(false)
+          setEnrichMsg('')
+          alert(`❌ Lusha 補電話失敗：${s.data.error}`)
+        } else {
+          setTimeout(poll, 5000)
+        }
+      }
+      setTimeout(poll, 5000)
+    } catch (e) {
+      setEnriching(false)
+      setEnrichMsg('')
+      alert('Lusha 補電話失敗，請稍後再試')
+    }
+  }
+
+  const handleEnrollSequence = async (seqId: string) => {
+    const res = await enrollSequence(seqId, [...checked])
+    alert(`已加入序列：${res.data.enrolled} 筆，跳過（已加入）：${res.data.skipped} 筆`)
+    clearChecked()
+  }
+  const handleScoreAll = async () => {
+    setScoringAll(true)
+    try { await scoreBatch(); loadLeads() }
+    finally { setScoringAll(false) }
+  }
+
+  const handleBatchAnalyzeSignals = async () => {
+    setAnalyzingAll(true)
+    try {
+      const res = await batchAnalyzeSignals(undefined, true)
+      alert(`✅ 含金量分析完成：${res.data.processed} 筆`)
+      loadLeads()
+    } catch {
+      alert('批量分析失敗')
+    } finally {
+      setAnalyzingAll(false)
+    }
+  }
+
+  const handleExportCsv = async () => {
+    try {
+      const res = await exportCsv()
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `leads_${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('匯出失敗')
+    }
+  }
+
+  const filteredLeads = applyFilter(leads, advFilter)
+
+  return (
+    <div className="p-3 md:p-6">
+      <div className="mb-4 md:mb-6">
+        <h1 className="text-xl font-bold">名單管理</h1>
+        <p className="text-sm text-muted-foreground mt-0.5">管理你的陌生開發名單</p>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-1 mb-6 border-b">
+        {TABS.map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {activeTab === '手動管理' && (
+        <div className="flex gap-4">
+          {/* Advanced filter sidebar */}
+          {showFilterSidebar && (
+            <AdvancedFilterSidebar
+              leads={leads}
+              users={allUsers}
+              filter={advFilter}
+              onChange={setAdvFilter}
+              tags={allTags}
+            />
+          )}
+
+          <div className="flex-1 min-w-0">
+          {/* Toolbar */}
+          <div className="mb-4 space-y-2">
+            {/* Row 1: search + status filter + add button */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <div className="relative flex-1 min-w-0 max-w-xs">
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="搜尋公司 / 聯絡人..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="pl-8"
+                />
+              </div>
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-32 md:w-36"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部狀態</SelectItem>
+                  {STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Button
+                variant={showFilterSidebar ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setShowFilterSidebar(v => !v)}
+              >
+                <SlidersHorizontal className="w-4 h-4 md:mr-1.5" />
+                <span className="hidden md:inline">進階篩選</span>
+              </Button>
+              <Button onClick={() => setShowCreate(true)}>
+                <Plus className="w-4 h-4 md:mr-1.5" />
+                <span className="hidden md:inline">新增名單</span>
+              </Button>
+              {/* View toggle */}
+              <div className="flex border rounded-md overflow-hidden ml-auto">
+                <button
+                  onClick={() => setViewMode('table')}
+                  className={`px-2.5 py-1.5 flex items-center gap-1 text-sm transition-colors ${viewMode === 'table' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground hover:bg-muted'}`}
+                  title="列表視圖"
+                >
+                  <Table2 className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setViewMode('kanban')}
+                  className={`px-2.5 py-1.5 flex items-center gap-1 text-sm transition-colors ${viewMode === 'kanban' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground hover:bg-muted'}`}
+                  title="看板視圖"
+                >
+                  <LayoutGrid className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setViewMode('company')}
+                  className={`px-2.5 py-1.5 flex items-center gap-1 text-sm transition-colors ${viewMode === 'company' ? 'bg-primary text-primary-foreground' : 'bg-white text-muted-foreground hover:bg-muted'}`}
+                  title="公司視圖"
+                >
+                  <Building2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+            {/* Row 2: action buttons (hidden on mobile, collapse into row) */}
+            <div className="hidden md:flex items-center gap-2 flex-wrap">
+              <Button
+                variant={sortContact ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => setSortContact(v => !v)}
+                title="有電話+Email的名單排前面"
+              >
+                📞 {sortContact ? '聯絡資訊優先 ✓' : '聯絡資訊優先'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleScoreAll} disabled={scoringAll}>
+                <Star className={`w-4 h-4 mr-1.5 ${scoringAll ? 'animate-spin' : ''}`} />
+                {scoringAll ? '評分中...' : '批量評分'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleLushaEnrich} disabled={enriching}>
+                <RefreshCw className={`w-4 h-4 mr-1.5 ${enriching ? 'animate-spin' : ''}`} />
+                {enriching ? (enrichMsg || 'Lusha 補電話中...') : '📞 Lusha 補電話'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleBatchAnalyzeSignals} disabled={analyzingAll}>
+                🔍 {analyzingAll ? '分析中...' : '批量含金量分析'}
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleExportCsv}>
+                <Download className="w-4 h-4 mr-1.5" /> 匯出 CSV
+              </Button>
+            </div>
+          </div>
+
+          {/* Filter chips */}
+          <FilterChips filter={advFilter} onChange={setAdvFilter} />
+
+          {/* Batch action bar */}
+          {checked.size > 0 && (
+            <div className="flex items-center gap-2 mb-3 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-lg text-sm flex-wrap">
+              <span className="font-medium text-indigo-700">已選 {checked.size} 筆</span>
+              <div className="flex gap-2 flex-wrap">
+                <Select onValueChange={handleBulkStatus}>
+                  <SelectTrigger className="h-7 text-xs w-32"><SelectValue placeholder="改狀態" /></SelectTrigger>
+                  <SelectContent>
+                    {STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                {sequences.length > 0 && (
+                  <Select onValueChange={handleEnrollSequence}>
+                    <SelectTrigger className="h-7 text-xs w-36"><SelectValue placeholder="加入序列" /></SelectTrigger>
+                    <SelectContent>
+                      {sequences.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleBulkScore} disabled={scoringAll}>
+                  <Star className="w-3 h-3 mr-1" /> 評分
+                </Button>
+                {allTags.length > 0 && (
+                  <Select onValueChange={async (tagId) => {
+                    const promises = [...checked].map(leadId => addLeadTags(leadId, [tagId]))
+                    await Promise.all(promises)
+                    alert(`✅ 已為 ${checked.size} 筆名單加上標籤`)
+                  }}>
+                    <SelectTrigger className="h-7 text-xs w-28"><SelectValue placeholder="加標籤" /></SelectTrigger>
+                    <SelectContent>
+                      {allTags.map(tag => (
+                        <SelectItem key={tag.id} value={tag.id}>
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-3 h-3 rounded-full inline-block flex-shrink-0" style={{ backgroundColor: tag.color }} />
+                            {tag.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleLushaEnrich} disabled={enriching}>
+                  <RefreshCw className={`w-3 h-3 mr-1 ${enriching ? 'animate-spin' : ''}`} />
+                  {enriching ? (enrichMsg || '補電話中...') : '📞 Lusha 補電話'}
+                </Button>
+                {user?.role !== 'sales' && (
+                  <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={handleBulkDelete}>
+                    <Trash2 className="w-3 h-3 mr-1" /> 刪除
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={clearChecked}>取消</Button>
+              </div>
+            </div>
+          )}
+
+          {loading ? (
+            <p className="text-sm text-muted-foreground mt-4">載入中...</p>
+          ) : viewMode === 'kanban' ? (
+            <div className="mt-4">
+              <KanbanView leads={filteredLeads} onUpdate={loadLeads} />
+            </div>
+          ) : viewMode === 'company' ? (
+            <CompanyView leads={filteredLeads} onSelect={lead => navigate(`/leads/${lead.id}`)} />
+          ) : filteredLeads.length === 0 ? (
+            <div className="text-center py-16 text-muted-foreground mt-4">
+              <p className="text-lg">尚無名單</p>
+              <p className="text-sm mt-1">點擊「新增名單」或透過 CSV 匯入</p>
+            </div>
+          ) : (
+            <>
+              {/* 手機版：card list */}
+              <div className="lg:hidden space-y-3 mt-4">
+                {filteredLeads.map(lead => (
+                  <div
+                    key={lead.id}
+                    className="bg-white rounded-lg border p-4 shadow-sm cursor-pointer active:bg-gray-50"
+                    onClick={() => navigate(`/leads/${lead.id}`)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div className="min-w-0 flex-1 mr-2">
+                        <h3 className="font-medium truncate">{lead.company_name}</h3>
+                        <p className="text-sm text-gray-500 truncate">{lead.contact_name || '—'}</p>
+                      </div>
+                      <StatusBadge status={lead.status} />
+                    </div>
+                    <div className="mt-2 text-sm text-gray-600 space-y-0.5">
+                      {lead.email && <p className="truncate">✉️ {lead.email}</p>}
+                      {lead.phone && <p>📞 {lead.phone}</p>}
+                    </div>
+                    {lead.enriched_score != null && (
+                      <div className="mt-2">
+                        <div className="text-xs text-gray-500">含金量 🏆</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${lead.enriched_score >= 70 ? 'bg-green-500' : lead.enriched_score >= 40 ? 'bg-yellow-400' : 'bg-gray-400'}`}
+                              style={{ width: `${lead.enriched_score}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground">{lead.enriched_score}</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center justify-between">
+                      <ScoreBadge score={lead.score} />
+                      {user?.role !== 'sales' && (
+                        <button
+                          onClick={e => handleDelete(lead.id, e)}
+                          className="text-muted-foreground hover:text-destructive transition-colors p-1"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                <div className="text-center text-xs text-muted-foreground py-2">
+                  共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
+                </div>
+              </div>
+
+              {/* 桌面版：原有 table */}
+              <div className="hidden lg:block">
+                <div className="bg-white rounded-lg border overflow-hidden mt-4">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50 text-muted-foreground">
+                      <tr>
+                        <th className="px-3 py-3 w-8">
+                          <input type="checkbox" checked={checked.size === filteredLeads.length && filteredLeads.length > 0} onChange={toggleAll} className="rounded" />
+                        </th>
+                        <th className="px-4 py-3 text-left font-medium">公司</th>
+                        <th className="px-4 py-3 text-left font-medium">聯絡人</th>
+                        <th className="px-4 py-3 text-left font-medium">Email</th>
+                        <th className="px-4 py-3 text-left font-medium">官網</th>
+                        <th className="px-4 py-3 text-left font-medium">狀態</th>
+                        <th className="px-4 py-3 text-left font-medium">評分</th>
+                        <th className="px-4 py-3 text-left font-medium cursor-pointer hover:text-primary" title="點擊依熱度排序">熱度 🔥</th>
+                        <th className="px-4 py-3 text-left font-medium">含金量 🏆</th>
+                        <th className="px-4 py-3 text-left font-medium">來源</th>
+                        <th className="px-4 py-3 text-left font-medium w-16"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {filteredLeads.map(lead => (
+                        <tr
+                          key={lead.id}
+                          className={`hover:bg-muted/30 cursor-pointer transition-colors ${checked.has(lead.id) ? 'bg-indigo-50' : ''}`}
+                          onClick={() => navigate(`/leads/${lead.id}`)}
+                        >
+                          <td className="px-3 py-3" onClick={e => toggleCheck(lead.id, e)}>
+                            <input type="checkbox" checked={checked.has(lead.id)} onChange={() => {}} className="rounded" />
+                          </td>
+                          <td className="px-4 py-3 font-medium">{lead.company_name}</td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {lead.contact_name || '—'}
+                            {lead.title && <span className="text-xs ml-1">({lead.title})</span>}
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">{lead.email || '—'}</td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            {lead.website ? (
+                              <a
+                                href={lead.website.startsWith('http') ? lead.website : `https://${lead.website}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-blue-500 hover:underline max-w-[120px] truncate block"
+                                title={lead.website}
+                              >
+                                {lead.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
+                              </a>
+                            ) : <span className="text-xs text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3"><StatusBadge status={lead.status} /></td>
+                          <td className="px-4 py-3"><ScoreBadge score={lead.score} /></td>
+                          <td className="px-4 py-3 text-xs">
+                            {(() => {
+                              const s = lead.engagement_score || 0
+                              if (s >= 50) return <span title={`${s}分`}>🔥🔥🔥</span>
+                              if (s >= 20) return <span title={`${s}分`}>🔥🔥</span>
+                              if (s > 0) return <span title={`${s}分`}>🔥</span>
+                              return <span className="text-gray-300" title="0分">⬜</span>
+                            })()}
+                          </td>
+                          <td className="px-4 py-3">
+                            {lead.enriched_score != null ? (
+                              <div className="flex items-center gap-1">
+                                <div className="w-16 bg-gray-100 rounded-full h-1.5">
+                                  <div
+                                    className={`h-1.5 rounded-full ${lead.enriched_score >= 70 ? 'bg-green-500' : lead.enriched_score >= 40 ? 'bg-yellow-400' : 'bg-gray-400'}`}
+                                    style={{ width: `${lead.enriched_score}%` }}
+                                  />
+                                </div>
+                                <span className="text-xs text-muted-foreground">{lead.enriched_score}</span>
+                              </div>
+                            ) : <span className="text-xs text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">{lead.source || '—'}</td>
+                          <td className="px-4 py-3">
+                            {user?.role !== 'sales' && (
+                              <button
+                                onClick={e => handleDelete(lead.id, e)}
+                                className="text-muted-foreground hover:text-destructive transition-colors"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div className="px-4 py-2 border-t text-xs text-muted-foreground">
+                    共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+          </div>{/* end flex-1 */}
+        </div>
+      )}
+
+      {activeTab === 'CSV 匯入' && <CsvImportTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
+      {activeTab === '會展爬取' && <ScraperTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
+
+      {/* Create modal */}
+      {showCreate && (
+        <CreateLeadModal onClose={() => setShowCreate(false)} onCreated={loadLeads} />
+      )}
+    </div>
+  )
+}

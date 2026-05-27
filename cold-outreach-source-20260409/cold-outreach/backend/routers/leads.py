@@ -1,0 +1,258 @@
+import csv
+import io
+from typing import Optional, List
+from uuid import UUID
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from sqlalchemy.orm import Session
+from database import get_db
+from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog
+from schemas import LeadCreate, LeadUpdate, LeadStatusUpdate, LeadOut, ActivityOut
+from auth import get_current_user
+
+router = APIRouter(prefix="/api/leads", tags=["leads"])
+
+
+def _check_access(lead: Lead, user: User):
+    if user.role == UserRole.sales and str(lead.assigned_to) != str(user.id):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+
+@router.get("", response_model=List[LeadOut])
+def list_leads(
+    status: Optional[str] = Query(None),
+    assigned_to: Optional[UUID] = Query(None),
+    search: Optional[str] = Query(None),
+    tags: Optional[str] = Query(None),  # comma-separated tag names
+    sort: Optional[str] = Query(None),  # "contact_first" = 有電話+email優先
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = db.query(Lead)
+    if current_user.role == UserRole.sales:
+        q = q.filter(Lead.assigned_to == current_user.id)
+    if status:
+        q = q.filter(Lead.status == status)
+    if assigned_to and current_user.role == UserRole.admin:
+        q = q.filter(Lead.assigned_to == assigned_to)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            Lead.company_name.ilike(like) |
+            Lead.contact_name.ilike(like) |
+            Lead.email.ilike(like)
+        )
+    if tags:
+        tag_names = [t.strip() for t in tags.split(",") if t.strip()]
+        if tag_names:
+            # Filter leads that have ALL the specified tags
+            for tag_name in tag_names:
+                tag = db.query(Tag).filter(Tag.name == tag_name).first()
+                if tag:
+                    q = q.filter(
+                        Lead.id.in_(
+                            db.query(LeadTag.lead_id).filter(LeadTag.tag_id == tag.id)
+                        )
+                    )
+    from sqlalchemy import case, and_
+    if sort == "contact_first":
+        # 有電話+email > 只有email > 只有電話 > 都沒有
+        priority = case(
+            (and_(Lead.phone.isnot(None), Lead.email.isnot(None)), 0),
+            (and_(Lead.phone.is_(None), Lead.email.isnot(None)), 1),
+            (and_(Lead.phone.isnot(None), Lead.email.is_(None)), 2),
+            else_=3
+        )
+        q = q.order_by(priority, Lead.created_at.desc())
+    else:
+        q = q.order_by(Lead.created_at.desc())
+    return q.offset(skip).limit(limit).all()
+
+
+@router.post("", response_model=LeadOut)
+def create_lead(
+    body: LeadCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role == UserRole.sales:
+        body.assigned_to = current_user.id
+    lead = Lead(**body.model_dump())
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    return lead
+
+
+@router.get("/{lead_id}", response_model=LeadOut)
+def get_lead(lead_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    _check_access(lead, current_user)
+    return lead
+
+
+@router.patch("/{lead_id}", response_model=LeadOut)
+def update_lead(
+    lead_id: UUID,
+    body: LeadUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    _check_access(lead, current_user)
+
+    old_status = lead.status
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(lead, field, value)
+
+    if body.status and body.status != old_status:
+        activity = LeadActivity(
+            lead_id=lead.id,
+            type=ActivityType.status_change,
+            content=f"{old_status.value} → {body.status.value}",
+            created_by=current_user.id,
+        )
+        db.add(activity)
+
+    db.commit()
+    db.refresh(lead)
+    return lead
+
+
+@router.delete("/{lead_id}")
+def delete_lead(lead_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == UserRole.sales:
+        raise HTTPException(status_code=403, detail="Sales cannot delete leads")
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    db.delete(lead)
+    db.commit()
+    return {"message": "deleted"}
+
+
+@router.patch("/{lead_id}/status", response_model=LeadOut)
+def update_status(
+    lead_id: UUID,
+    body: LeadStatusUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    _check_access(lead, current_user)
+
+    old_status = lead.status
+    lead.status = body.status
+    activity = LeadActivity(
+        lead_id=lead.id,
+        type=ActivityType.status_change,
+        content=f"{old_status.value} → {body.status.value}",
+        created_by=current_user.id,
+    )
+    db.add(activity)
+    db.commit()
+    db.refresh(lead)
+    return lead
+
+
+@router.post("/recalc_engagement/all")
+def recalc_engagement_all(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Recalculate engagement score for all leads."""
+    leads = db.query(Lead).all()
+    updated = 0
+    for lead in leads:
+        _recalc_one(lead, db)
+        updated += 1
+    db.commit()
+    return {"updated": updated}
+
+
+@router.post("/{lead_id}/recalc_engagement")
+def recalc_engagement(
+    lead_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Recalculate engagement score for a single lead."""
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    _recalc_one(lead, db)
+    db.commit()
+    db.refresh(lead)
+    return {"id": str(lead.id), "engagement_score": lead.engagement_score}
+
+
+def _recalc_one(lead: Lead, db: Session):
+    """Recalculate engagement score for a single lead object."""
+    score = 0
+    # Opens +10 each
+    opens = db.query(EmailOpen).filter(EmailOpen.lead_id == lead.id).count()
+    score += opens * 10
+    # Clicks +20 each
+    clicks = db.query(EmailClick).filter(EmailClick.lead_id == lead.id).count()
+    score += clicks * 20
+    # Replies +50
+    if lead.status in ("replied", "meeting_scheduled", "won"):
+        score += 50
+    # Calls +30 for answered, +5 others
+    calls = db.query(CallLog).filter(CallLog.lead_id == lead.id).all()
+    for c in calls:
+        score += 30 if c.outcome == "answered" else 5
+    # Status progression +15
+    activities = db.query(LeadActivity).filter(
+        LeadActivity.lead_id == lead.id,
+        LeadActivity.type == ActivityType.status_change,
+    ).count()
+    score += activities * 15
+    lead.engagement_score = score
+
+
+@router.post("/import")
+async def import_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    content = await file.read()
+    text = content.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(text))
+
+    created = 0
+    errors = []
+    for i, row in enumerate(reader):
+        try:
+            company = row.get("company_name") or row.get("公司名稱") or row.get("company")
+            if not company:
+                errors.append(f"Row {i+2}: missing company_name")
+                continue
+            lead = Lead(
+                company_name=company.strip(),
+                contact_name=(row.get("contact_name") or row.get("聯絡人") or "").strip() or None,
+                title=(row.get("title") or row.get("職稱") or "").strip() or None,
+                email=(row.get("email") or row.get("Email") or "").strip() or None,
+                phone=(row.get("phone") or row.get("電話") or "").strip() or None,
+                industry=(row.get("industry") or row.get("產業") or "").strip() or None,
+                city=(row.get("city") or row.get("城市") or "").strip() or None,
+                company_size=(row.get("company_size") or row.get("公司規模") or "").strip() or None,
+                source=(row.get("source") or "csv_import").strip(),
+                assigned_to=current_user.id if current_user.role == UserRole.sales else None,
+                status=LeadStatus.new,
+            )
+            db.add(lead)
+            created += 1
+        except Exception as e:
+            errors.append(f"Row {i+2}: {str(e)}")
+
+    db.commit()
+    return {"created": created, "errors": errors}
