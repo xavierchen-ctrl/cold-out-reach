@@ -1,7 +1,13 @@
 import axios from 'axios'
 
+// 本機開發：VITE_API_URL 未設定 → 用 Vite proxy（/api → localhost:8000）
+// 生產（Vercel）：VITE_API_URL=https://xxx.railway.app → 直接打後端
+const _base = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api`
+  : '/api'
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: _base,
   withCredentials: true,
 })
 

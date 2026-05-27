@@ -1,3 +1,4 @@
+import os
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr
@@ -6,6 +7,9 @@ from database import get_db
 from models import User, UserRole
 from schemas import LoginRequest, UserOut
 from auth import verify_password, hash_password, create_access_token, get_current_user, is_allowed_email, require_admin
+
+# HTTPS 環境（Railway/Vercel）啟用 secure cookie
+_COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -25,8 +29,8 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
         value=token,
         httponly=True,
         max_age=8 * 3600,
-        samesite="lax",
-        secure=False,   # set True behind HTTPS
+        samesite="none" if _COOKIE_SECURE else "lax",
+        secure=_COOKIE_SECURE,
     )
     return {"message": "ok", "user": UserOut.model_validate(user)}
 

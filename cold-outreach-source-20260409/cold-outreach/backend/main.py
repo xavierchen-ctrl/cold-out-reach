@@ -1,6 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
@@ -128,6 +129,18 @@ app = FastAPI(
     title="Cold Outreach Platform",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+# ── CORS（前端分離部署時啟用）────────────────────────────────────────────────────
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:5173")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ── API Routers ────────────────────────────────────────────────────────────────
