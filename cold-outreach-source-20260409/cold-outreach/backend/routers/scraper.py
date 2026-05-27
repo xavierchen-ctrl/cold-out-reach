@@ -146,6 +146,18 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
 
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
+import os as _os
+
+@router.get("/check-env")
+def check_env(_: User = Depends(get_current_user)):
+    """診斷：確認各爬蟲 API key 是否已設定（只顯示是否存在，不顯示值）"""
+    return {
+        "APOLLO_API_KEY":    bool(_os.getenv("APOLLO_API_KEY")),
+        "GEMINI_API_KEY":    bool(_os.getenv("GEMINI_API_KEY")),
+        "DATABASE_URL":      bool(_os.getenv("DATABASE_URL")),
+    }
+
+
 @router.post("/run", response_model=ScraperJobOut)
 async def run_scrape(
     body: ScraperRunRequest,
