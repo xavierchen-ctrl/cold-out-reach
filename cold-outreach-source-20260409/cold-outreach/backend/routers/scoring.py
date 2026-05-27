@@ -1,7 +1,8 @@
-import re
+﻿import re
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
+from utils import now_tw
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
@@ -126,7 +127,7 @@ def score_lead(
 
     lead.score = score
     lead.score_reason = full_reason
-    lead.updated_at = datetime.utcnow()
+    lead.updated_at = now_tw()
     db.commit()
     db.refresh(lead)
     return ScoreResponse(lead_id=lead.id, score=score, score_reason=full_reason, updated_at=lead.updated_at)
@@ -169,7 +170,7 @@ def score_batch(
             lead.status = LeadStatus.mql
         lead.score = score
         lead.score_reason = full_reason
-        lead.updated_at = datetime.utcnow()
+        lead.updated_at = now_tw()
         updated += 1
 
     db.commit()

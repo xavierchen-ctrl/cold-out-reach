@@ -1,4 +1,4 @@
-import os
+﻿import os
 import json
 import re
 from typing import Optional
@@ -437,6 +437,7 @@ def pipeline_health(
         raise HTTPException(status_code=503, detail="Gemini API key not configured")
 
     from datetime import datetime, timedelta
+from utils import now_tw
     from sqlalchemy import func
 
     total = db.query(Lead).count()
@@ -444,13 +445,13 @@ def pipeline_health(
     for row in db.query(Lead.status, func.count()).group_by(Lead.status).all():
         by_status[row[0].value] = row[1]
 
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = now_tw() - timedelta(days=7)
     emails_week = db.query(LeadActivity).filter(
         LeadActivity.type == ActivityType.email_sent,
         LeadActivity.created_at >= week_ago,
     ).count()
 
-    stale_threshold = datetime.utcnow() - timedelta(days=7)
+    stale_threshold = now_tw() - timedelta(days=7)
     stale_count = 0
     for lead in db.query(Lead).filter(Lead.status.in_([LeadStatus.contacted, LeadStatus.replied])).all():
         last = db.query(LeadActivity).filter(

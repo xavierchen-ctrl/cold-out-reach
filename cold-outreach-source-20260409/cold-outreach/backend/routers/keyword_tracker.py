@@ -1,5 +1,6 @@
-import re
+﻿import re
 from datetime import datetime
+from utils import now_tw
 from typing import List, Optional, Any
 from uuid import UUID
 import httpx
@@ -121,7 +122,7 @@ async def check_keywords(tracker_id: UUID, db: Session = Depends(get_db), curren
         else:
             results[keyword] = {"found": False, "count": 0, "context": None}
     
-    tracker.last_checked = datetime.utcnow()
+    tracker.last_checked = now_tw()
     tracker.last_result = results
     db.commit()
     db.refresh(tracker)

@@ -1,7 +1,8 @@
-"""Scheduled email sending — create, list, process."""
+﻿"""Scheduled email sending — create, list, process."""
 import json
 import base64
 from datetime import datetime
+from utils import now_tw
 from typing import List, Optional
 from uuid import UUID
 
@@ -58,7 +59,7 @@ def schedule_email(
         raise HTTPException(status_code=404, detail="Lead not found")
 
     # Inject tracking pixel
-    email_id = str(body.lead_id) + "_" + datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    email_id = str(body.lead_id) + "_" + now_tw().strftime("%Y%m%d%H%M%S")
     tracking_pixel = f'<img src="{TRACKING_BASE_URL}/api/track/open/{email_id}" width="1" height="1" style="display:none" />'
     tracked_body = body.body + "\n\n" + tracking_pixel
 
@@ -94,7 +95,7 @@ def process_scheduled(
     current_user: User = Depends(get_current_user),
 ):
     """Process all due scheduled emails. Requires Gmail token on the creator."""
-    now = datetime.utcnow()
+    now = now_tw()
     due = db.query(ScheduledEmail).filter(
         ScheduledEmail.status == "pending",
         ScheduledEmail.scheduled_at <= now,
@@ -132,7 +133,7 @@ def process_scheduled(
             service.users().messages().send(userId="me", body={"raw": raw}).execute()
 
             sched.status = "sent"
-            sched.sent_at = datetime.utcnow()
+            sched.sent_at = now_tw()
 
             # Log activity
             activity = LeadActivity(

@@ -1,4 +1,4 @@
-import uuid
+﻿import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Enum as SAEnum, Integer, Boolean, JSON
 from sqlalchemy.orm import relationship
@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import UUID, ARRAY
 import enum
 
 from database import Base
+from utils import now_tw
 
 
 class UserRole(str, enum.Enum):
@@ -50,7 +51,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.sales)
     gmail_token = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     leads = relationship("Lead", back_populates="assigned_user", foreign_keys="Lead.assigned_to")
     activities = relationship("LeadActivity", back_populates="creator")
@@ -89,8 +90,8 @@ class Lead(Base):
     tax_id = Column(String(20), nullable=True)         # 統一編號（統編）
     representative_name = Column(String(255), nullable=True)  # 代表人姓名
     capital_amount = Column(String(50), nullable=True)  # 資本總額(元)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
+    updated_at = Column(DateTime, default=now_tw, onupdate=now_tw)
 
     assigned_user = relationship("User", back_populates="leads", foreign_keys=[assigned_to])
     activities = relationship("LeadActivity", back_populates="lead", cascade="all, delete-orphan")
@@ -109,7 +110,7 @@ class LeadActivity(Base):
     type = Column(SAEnum(ActivityType), nullable=False)
     content = Column(Text, nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", back_populates="activities")
     creator = relationship("User", back_populates="activities")
@@ -122,7 +123,7 @@ class EmailSequence(Base):
     name = Column(String(100), nullable=False)
     steps = Column(Text, nullable=False)  # JSON: [{day, template_type}]
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     enrollments = relationship("SequenceEnrollment", back_populates="sequence", cascade="all, delete-orphan")
 
@@ -134,7 +135,7 @@ class SequenceEnrollment(Base):
     lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
     sequence_id = Column(UUID(as_uuid=True), ForeignKey("email_sequences.id", ondelete="CASCADE"), nullable=False)
     current_step = Column(Integer, default=0)
-    enrolled_at = Column(DateTime, default=datetime.utcnow)
+    enrolled_at = Column(DateTime, default=now_tw)
     next_send_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="active")  # active / completed / paused
     enrolled_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
@@ -154,7 +155,7 @@ class PendingEmail(Base):
     subject = Column(String(500), nullable=False)
     body = Column(Text, nullable=False)
     status = Column(String(20), default="pending")  # pending / sent / skipped
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", back_populates="pending_emails")
     enrollment = relationship("SequenceEnrollment", back_populates="pending_emails")
@@ -169,7 +170,7 @@ class EmailTemplate(Base):
     body = Column(Text, nullable=False)
     template_type = Column(String(50), nullable=False, default="intro")  # intro/followup/proposal/custom
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
 
 class ScheduledEmail(Base):
@@ -185,7 +186,7 @@ class ScheduledEmail(Base):
     sent_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="pending")  # pending / sent / failed
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", foreign_keys=[lead_id])
 
@@ -196,7 +197,7 @@ class EmailOpen(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email_id = Column(String(255), nullable=False)  # activity id or scheduled_email id
     lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
-    opened_at = Column(DateTime, default=datetime.utcnow)
+    opened_at = Column(DateTime, default=now_tw)
     ip = Column(String(50), nullable=True)
 
     lead = relationship("Lead", foreign_keys=[lead_id])
@@ -211,8 +212,8 @@ class ScraperJob(Base):
     status = Column(SAEnum(ScraperJobStatus), nullable=False, default=ScraperJobStatus.pending)
     result_json = Column(Text, nullable=True)      # JSON array of scraped companies
     error_msg = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
+    updated_at = Column(DateTime, default=now_tw, onupdate=now_tw)
 
 
 # ── Round 1: CRM 深化 ─────────────────────────────────────────────────────────
@@ -229,7 +230,7 @@ class Contact(Base):
     linkedin = Column(String(500))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", back_populates="contacts")
 
@@ -266,7 +267,7 @@ class Attachment(Base):
     drive_url = Column(String(1000), nullable=True)   # Google Drive 連結
     drive_name = Column(String(500), nullable=True)   # Drive 檔案名稱（手動輸入）
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", back_populates="attachments")
     uploader = relationship("User", foreign_keys=[uploaded_by])
@@ -291,7 +292,7 @@ class ABTest(Base):
     replied_a = Column(Integer, default=0)
     replied_b = Column(Integer, default=0)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     creator = relationship("User", foreign_keys=[created_by])
 
@@ -305,7 +306,7 @@ class Webhook(Base):
     events = Column(ARRAY(String))  # ["lead.status_changed", "lead.won", "email.replied"]
     is_active = Column(Boolean, default=True)
     secret = Column(String(255))  # HMAC signature secret
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
 
 class WebhookLog(Base):
@@ -316,7 +317,7 @@ class WebhookLog(Base):
     event = Column(String(100))
     payload = Column(Text)
     response_status = Column(Integer)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     webhook = relationship("Webhook", foreign_keys=[webhook_id])
 
@@ -332,7 +333,7 @@ class KeywordTracker(Base):
     website_url = Column(String(1000))
     last_checked = Column(DateTime)
     last_result = Column(JSON)  # {keyword: found/not_found, context: "..."}
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", foreign_keys=[lead_id])
 
@@ -345,7 +346,7 @@ class WeeklyReport(Base):
     week_end = Column(DateTime, nullable=False)
     content = Column(Text)  # Markdown
     stats_snapshot = Column(JSON)  # {sent, replied, won, new_leads, ...}
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
 
 # ── Round 4: Cadence 波段引擎 ─────────────────────────────────────────────────
@@ -365,7 +366,7 @@ class Cadence(Base):
     description = Column(Text)
     steps = Column(JSON)  # [{day: 1, type: "email", template_id: "...", note: "..."}, ...]
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     creator = relationship("User", foreign_keys=[created_by])
     enrollments = relationship("CadenceEnrollment", back_populates="cadence", cascade="all, delete-orphan")
@@ -379,7 +380,7 @@ class CadenceEnrollment(Base):
     lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"))
     current_step = Column(Integer, default=0)
     status = Column(String(50), default="active")  # active/paused/completed
-    enrolled_at = Column(DateTime, default=datetime.utcnow)
+    enrolled_at = Column(DateTime, default=now_tw)
     next_action_at = Column(DateTime)
     completed_at = Column(DateTime)
 
@@ -398,7 +399,7 @@ class CadenceStepLog(Base):
     status = Column(String(50), default="pending")  # pending/done/skipped
     note = Column(Text)
     executed_at = Column(DateTime)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
     enrollment = relationship("CadenceEnrollment", back_populates="step_logs")
 
@@ -412,7 +413,7 @@ class EmailClick(Base):
     email_id = Column(String(255))
     lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
     url = Column(String(2000))
-    clicked_at = Column(DateTime, default=datetime.utcnow)
+    clicked_at = Column(DateTime, default=now_tw)
     ip = Column(String(50))
 
     lead = relationship("Lead", foreign_keys=[lead_id])
@@ -429,7 +430,7 @@ class ICPProfile(Base):
     company_sizes = Column(ARRAY(String), default=[])
     titles = Column(ARRAY(String), default=[])
     locations = Column(ARRAY(String), default=[])
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=now_tw)
 
 
 # ── Round 4: 通話記錄 ──────────────────────────────────────────────────────────
@@ -443,7 +444,7 @@ class CallLog(Base):
     duration_seconds = Column(Integer)
     outcome = Column(String(100))  # answered/no_answer/voicemail/callback_requested
     note = Column(Text)
-    called_at = Column(DateTime, default=datetime.utcnow)
+    called_at = Column(DateTime, default=now_tw)
 
     lead = relationship("Lead", foreign_keys=[lead_id])
     caller = relationship("User", foreign_keys=[caller_id])

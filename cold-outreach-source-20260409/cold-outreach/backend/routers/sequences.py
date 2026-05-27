@@ -1,8 +1,9 @@
-import json
+﻿import json
 import os
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime, timedelta
+from utils import now_tw
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -146,7 +147,7 @@ def enroll_leads(
             lead_id=lead_id,
             sequence_id=seq_id,
             current_step=0,
-            next_send_at=datetime.utcnow() + timedelta(days=first_day),
+            next_send_at=now_tw() + timedelta(days=first_day),
             enrolled_by=current_user.id,
         )
         db.add(enrollment)
@@ -159,7 +160,7 @@ def enroll_leads(
 @router.post("/process")
 def process_sequences(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Process due sequence steps — generate AI drafts → create PendingEmail records."""
-    now = datetime.utcnow()
+    now = now_tw()
     due = db.query(SequenceEnrollment).filter(
         SequenceEnrollment.status == "active",
         SequenceEnrollment.next_send_at <= now,

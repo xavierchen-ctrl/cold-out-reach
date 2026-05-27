@@ -1,5 +1,6 @@
-import os
+﻿import os
 from datetime import datetime, timedelta
+from utils import now_tw
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
@@ -71,7 +72,7 @@ async def generate_weekly_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    now = datetime.utcnow()
+    now = now_tw()
     # This week: Monday to now
     days_since_monday = now.weekday()
     week_start = (now - timedelta(days=days_since_monday)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -219,7 +220,7 @@ async def export_pdf(report_id: Optional[str] = None, db: Session = Depends(get_
         week_start = report.week_start.strftime("%Y-%m-%d")
     else:
         content = "# 週報\n\n請先生成週報。"
-        week_start = datetime.utcnow().strftime("%Y-%m-%d")
+        week_start = now_tw().strftime("%Y-%m-%d")
     
     # Convert markdown to simple HTML
     import re

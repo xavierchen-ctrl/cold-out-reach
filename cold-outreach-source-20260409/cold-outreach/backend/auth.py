@@ -1,4 +1,4 @@
-import os
+﻿import os
 import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
@@ -43,6 +43,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(user_id: str, role: str) -> str:
+    # JWT exp 必須是 UTC（jose 將 naive datetime 視為 UTC）
     expire = datetime.utcnow() + timedelta(hours=TOKEN_EXPIRE_HOURS)
     payload = {"sub": user_id, "role": role, "exp": expire}
     return jwt.encode(payload, JWT_SECRET, algorithm=ALGORITHM)

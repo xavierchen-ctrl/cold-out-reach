@@ -1,7 +1,8 @@
-"""Reports — CSV, Excel export, sales performance, and delivery reports."""
+﻿"""Reports — CSV, Excel export, sales performance, and delivery reports."""
 import io
 import csv
 from datetime import datetime, timedelta
+from utils import now_tw
 from typing import Optional
 
 from fastapi import APIRouter, Depends
@@ -443,7 +444,7 @@ def export_excel(
     total = len(leads)
     won = sum(1 for l in leads if l.status == LeadStatus.won)
     contacted = sum(1 for l in leads if l.status in [LeadStatus.contacted, LeadStatus.replied, LeadStatus.meeting_scheduled, LeadStatus.won])
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = now_tw() - timedelta(days=7)
     emails_week = db.query(LeadActivity).filter(
         LeadActivity.type == ActivityType.email_sent,
         LeadActivity.created_at >= week_ago,
@@ -493,7 +494,7 @@ def sales_performance(
     # Weekly stats for last 8 weeks
     weekly = []
     for i in range(7, -1, -1):
-        week_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = now_tw().replace(hour=0, minute=0, second=0, microsecond=0)
         week_start -= timedelta(days=week_start.weekday() + i * 7)
         week_end = week_start + timedelta(days=7)
 

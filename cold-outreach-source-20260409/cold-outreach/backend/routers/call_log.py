@@ -1,5 +1,6 @@
-"""通話記錄管理."""
+﻿"""通話記錄管理."""
 from datetime import datetime
+from utils import now_tw
 from typing import List, Optional
 from uuid import UUID
 
@@ -66,7 +67,7 @@ def create_call(
         duration_seconds=body.get("duration_seconds"),
         outcome=body.get("outcome"),
         note=body.get("note"),
-        called_at=datetime.utcnow(),
+        called_at=now_tw(),
     )
     db.add(call)
 

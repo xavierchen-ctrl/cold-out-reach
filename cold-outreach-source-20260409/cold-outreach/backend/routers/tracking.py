@@ -1,7 +1,8 @@
-"""Email open & click tracking."""
+﻿"""Email open & click tracking."""
 import os
 import base64
 from datetime import datetime
+from utils import now_tw
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
@@ -63,7 +64,7 @@ def track_open(
         open_event = EmailOpen(
             email_id=email_id,
             lead_id=lead_id_str,
-            opened_at=datetime.utcnow(),
+            opened_at=now_tw(),
             ip=ip,
         )
         db.add(open_event)
@@ -103,7 +104,7 @@ def track_click(
             email_id=email_id,
             lead_id=lead_id_str if lead_id_str else None,
             url=original_url,
-            clicked_at=datetime.utcnow(),
+            clicked_at=now_tw(),
             ip=ip,
         )
         db.add(click_event)

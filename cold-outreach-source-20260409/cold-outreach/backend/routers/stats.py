@@ -1,7 +1,8 @@
-import os
+﻿import os
 import json
 import time
 from datetime import datetime, timedelta
+from utils import now_tw
 from typing import List
 from fastapi import APIRouter, Depends
 from sqlalchemy import func
@@ -35,7 +36,7 @@ def overview(
     for row in q.with_entities(Lead.status, func.count()).group_by(Lead.status).all():
         counts[row[0].value] = row[1]
 
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = now_tw() - timedelta(days=7)
     email_q = db.query(LeadActivity).filter(
         LeadActivity.type == ActivityType.email_sent,
         LeadActivity.created_at >= week_ago,
@@ -103,7 +104,7 @@ def trend(
     """最近 14 天每日新增名單數 + 發信數"""
     result = []
     for i in range(13, -1, -1):
-        day_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
+        day_start = now_tw().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
         day_end = day_start + timedelta(days=1)
         lq = db.query(Lead).filter(Lead.created_at >= day_start, Lead.created_at < day_end)
         eq = db.query(LeadActivity).filter(
@@ -128,7 +129,7 @@ def stale_leads(
     current_user: User = Depends(get_current_user),
 ):
     """超過 7 天未有 activity 的 leads（前 10 筆）"""
-    threshold = datetime.utcnow() - timedelta(days=7)
+    threshold = now_tw() - timedelta(days=7)
     active_statuses = [LeadStatus.contacted, LeadStatus.replied, LeadStatus.meeting_scheduled, LeadStatus.new]
     q = db.query(Lead).filter(Lead.status.in_(active_statuses))
     if current_user.role == UserRole.sales:
@@ -146,7 +147,7 @@ def stale_leads(
                 "company_name": lead.company_name,
                 "status": lead.status.value,
                 "last_activity": last_date.isoformat(),
-                "days_stale": (datetime.utcnow() - last_date).days,
+                "days_stale": (now_tw() - last_date).days,
             })
         if len(stale) >= 10:
             break
@@ -165,7 +166,7 @@ def ai_suggestions(
         return {"suggestions": _suggestion_cache["data"]}
 
     # Gather context
-    threshold = datetime.utcnow() - timedelta(days=7)
+    threshold = now_tw() - timedelta(days=7)
     total = db.query(Lead).count()
     replied = db.query(Lead).filter(Lead.status == LeadStatus.replied).count()
     stale_count = 0
@@ -220,13 +221,13 @@ def pipeline_health_cached(
     for row in db.query(Lead.status, sqlfunc.count()).group_by(Lead.status).all():
         by_status[row[0].value] = row[1]
 
-    week_ago = datetime.utcnow() - timedelta(days=7)
+    week_ago = now_tw() - timedelta(days=7)
     emails_week = db.query(LeadActivity).filter(
         LeadActivity.type == ActivityType.email_sent,
         LeadActivity.created_at >= week_ago,
     ).count()
 
-    stale_threshold = datetime.utcnow() - timedelta(days=7)
+    stale_threshold = now_tw() - timedelta(days=7)
     stale_count = 0
     for lead in db.query(Lead).filter(Lead.status.in_([LeadStatus.contacted, LeadStatus.replied])).all():
         last = db.query(LeadActivity).filter(

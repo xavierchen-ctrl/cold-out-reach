@@ -1,4 +1,4 @@
-"""
+﻿"""
 Scraper router — 會展廠商爬取模組
 Sources: TAITRA, MEET TAIPEI, TWAA, DMA, 104, 1111, Google Maps, 工商登記, Facebook, Shopee, Momo
 策略: 模組化爬蟲 (scrapers/) + legacy parsers
@@ -11,6 +11,7 @@ import logging
 from typing import List, Optional
 from uuid import UUID
 from datetime import datetime
+from utils import now_tw
 
 import httpx
 
@@ -105,7 +106,7 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
         if not job:
             return
         job.status = ScraperJobStatus.running
-        job.updated_at = datetime.utcnow()
+        job.updated_at = now_tw()
         db.commit()
 
         try:
@@ -115,19 +116,19 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
             )
             job.result_json = json.dumps(companies_dicts, ensure_ascii=False)
             job.status = ScraperJobStatus.done
-            job.updated_at = datetime.utcnow()
+            job.updated_at = now_tw()
             db.commit()
             logger.info(f"Scrape job {job_id} done: {len(companies_dicts)} companies")
         except asyncio.TimeoutError:
             job.status = ScraperJobStatus.failed
             job.error_msg = f"逾時（超過 {SCRAPE_TIMEOUT_SECONDS // 60} 分鐘）"
-            job.updated_at = datetime.utcnow()
+            job.updated_at = now_tw()
             db.commit()
             logger.warning(f"Scrape job {job_id} timed out after {SCRAPE_TIMEOUT_SECONDS}s")
         except Exception as e:
             job.status = ScraperJobStatus.failed
             job.error_msg = str(e)
-            job.updated_at = datetime.utcnow()
+            job.updated_at = now_tw()
             db.commit()
 
     except Exception as e:
@@ -136,7 +137,7 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
             if job:
                 job.status = ScraperJobStatus.failed
                 job.error_msg = str(e)
-                job.updated_at = datetime.utcnow()
+                job.updated_at = now_tw()
                 db.commit()
         except Exception:
             pass

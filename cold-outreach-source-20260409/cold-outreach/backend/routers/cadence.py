@@ -1,6 +1,7 @@
-"""Cadence 波段引擎 — 多管道跟進序列管理."""
+﻿"""Cadence 波段引擎 — 多管道跟進序列管理."""
 import uuid
 from datetime import datetime, timedelta
+from utils import now_tw
 from typing import List, Optional
 from uuid import UUID
 
@@ -115,7 +116,7 @@ def get_due_steps(
     current_user: User = Depends(get_current_user),
 ):
     """Return all active enrollments where next_action_at <= now."""
-    now = datetime.utcnow()
+    now = now_tw()
     enrollments = (
         db.query(CadenceEnrollment)
         .filter(
@@ -204,7 +205,7 @@ def enroll_leads(
             skipped.append(lid)
             continue
 
-        now = datetime.utcnow()
+        now = now_tw()
         next_at = None
         if steps:
             day_offset = steps[0].get("day", 1)
@@ -263,7 +264,7 @@ def advance_enrollment(
         step_type=steps[e.current_step]["type"] if e.current_step < len(steps) else "unknown",
         status="done",
         note=body.get("note"),
-        executed_at=datetime.utcnow(),
+        executed_at=now_tw(),
     )
     db.add(log)
 
@@ -271,11 +272,11 @@ def advance_enrollment(
     e.current_step += 1
     if e.current_step >= len(steps):
         e.status = "completed"
-        e.completed_at = datetime.utcnow()
+        e.completed_at = now_tw()
         e.next_action_at = None
     else:
         next_step = steps[e.current_step]
-        base = e.enrolled_at or datetime.utcnow()
+        base = e.enrolled_at or now_tw()
         day_offset = next_step.get("day", e.current_step + 1)
         e.next_action_at = base + timedelta(days=day_offset - 1)
 
@@ -316,18 +317,18 @@ def skip_step(
         step_type=steps[e.current_step]["type"] if e.current_step < len(steps) else "unknown",
         status="skipped",
         note=body.get("note"),
-        executed_at=datetime.utcnow(),
+        executed_at=now_tw(),
     )
     db.add(log)
 
     e.current_step += 1
     if e.current_step >= len(steps):
         e.status = "completed"
-        e.completed_at = datetime.utcnow()
+        e.completed_at = now_tw()
         e.next_action_at = None
     else:
         next_step = steps[e.current_step]
-        base = e.enrolled_at or datetime.utcnow()
+        base = e.enrolled_at or now_tw()
         day_offset = next_step.get("day", e.current_step + 1)
         e.next_action_at = base + timedelta(days=day_offset - 1)
 
