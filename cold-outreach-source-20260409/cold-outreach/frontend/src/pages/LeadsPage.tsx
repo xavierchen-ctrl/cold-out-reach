@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+﻿import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getLeads, createLead, updateLead, deleteLead, updateLeadStatus,
@@ -462,7 +462,7 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
   }, [])
 
   useEffect(() => { loadJobs() }, [loadJobs])
-  useEffect(() => { getICPs().then(r => setIcps(r.data)).catch(() => {}) }, [])
+  useEffect(() => { getICPs().then(r => setIcps(Array.isArray(r.data) ? r.data : [])).catch(() => {}) }, [])
 
   // Poll for running jobs
   useEffect(() => {
@@ -782,7 +782,7 @@ export default function LeadsPage() {
       if (advFilter.tags && advFilter.tags.length > 0) params.tags = advFilter.tags.join(',')
       if (sortContact) params.sort = 'contact_first'
       const res = await getLeads(params)
-      setLeads(res.data)
+      setLeads(Array.isArray(res.data) ? res.data : [])
     } finally {
       setLoading(false)
     }
@@ -790,9 +790,9 @@ export default function LeadsPage() {
 
   useEffect(() => { loadLeads() }, [loadLeads])
   useEffect(() => {
-    getSequences().then(r => setSequences(r.data)).catch(() => {})
-    getUsers().then(r => setAllUsers(r.data)).catch(() => {})
-    getTags().then(r => setAllTags(r.data)).catch(() => {})
+    getSequences().then(r => setSequences(Array.isArray(r.data) ? r.data : [])).catch(() => {})
+    getUsers().then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {})
+    getTags().then(r => setAllTags(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [])
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {

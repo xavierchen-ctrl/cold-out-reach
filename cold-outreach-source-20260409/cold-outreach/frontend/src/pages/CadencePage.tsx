@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import {
   getCadences, createCadence, deleteCadence, updateCadence,
   enrollCadence, getCadenceEnrollments, advanceEnrollment, skipStep,
@@ -165,7 +165,7 @@ export default function CadencePage() {
 
   useEffect(() => {
     loadCadences()
-    getTemplates().then(r => setTemplates(r.data)).catch(() => {})
+    getTemplates().then(r => setTemplates(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [loadCadences])
 
   useEffect(() => {

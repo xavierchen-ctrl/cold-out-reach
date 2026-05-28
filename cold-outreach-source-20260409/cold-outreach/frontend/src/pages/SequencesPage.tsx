@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { getSequences, createSequence, deleteSequence, getPendingEmails, sendPendingEmail, skipPendingEmail, processSequences, getTemplates } from '@/lib/api'
 import { EmailTemplate } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -194,7 +194,7 @@ function CreateSequenceModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
 
   useEffect(() => {
-    getTemplates().then(r => setTemplates(r.data)).catch(() => {})
+    getTemplates().then(r => setTemplates(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [])
 
   const addStep = () => {
