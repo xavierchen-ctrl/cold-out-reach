@@ -384,7 +384,7 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
     setLoading(true)
     try {
       const res = await importCSV(file)
-      setResult(Array.isArray(res.data) ? res.data : [])
+      setResult(res.data)
       onImported()
     } catch (e: unknown) {
       alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '匯入失敗')
@@ -839,7 +839,7 @@ export default function LeadsPage() {
       const ids = checked.size > 0 ? [...checked] : undefined
       const limit = checked.size > 0 ? checked.size : 20
       const res = await enrichLushaPhone(ids as string[] | undefined, limit)
-      const jobId = (Array.isArray(res.data) ? res.data : []).job_id
+      const jobId = res.data.job_id
       setEnrichMsg(`執行中（每筆約 12 秒）...`)
       // Polling
       const poll = async () => {

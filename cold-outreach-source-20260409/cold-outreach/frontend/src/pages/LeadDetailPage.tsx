@@ -124,8 +124,8 @@ export default function LeadDetailPage() {
   const loadLead = useCallback(async () => {
     if (!id) return
     const res = await getLead(id)
-    setLead(Array.isArray(res.data) ? res.data : [])
-    setForm(Array.isArray(res.data) ? res.data : [])
+    setLead(res.data)
+    setForm(res.data)
     setEmailTo(res.data.email || '')
     setCapitalInput(res.data.capital_amount || '')
   }, [id])
@@ -230,7 +230,7 @@ export default function LeadDetailPage() {
     setLushaMsg('啟動中...')
     try {
       const res = await enrichLushaPhone([id], 1)
-      const jobId = (Array.isArray(res.data) ? res.data : []).job_id
+      const jobId = res.data.job_id
       setLushaMsg('查詢中...')
       const poll = async () => {
         const s = await enrichLushaStatus(jobId)
@@ -265,7 +265,7 @@ export default function LeadDetailPage() {
     setEnriching(true)
     try {
       const res = await enrichCompany(lead.company_name, id)
-      const data = (Array.isArray(res.data) ? res.data : [])
+      const data = res.data
       setForm(f => ({
         ...f,
         industry: f.industry || data.industry || f.industry,
@@ -414,7 +414,7 @@ export default function LeadDetailPage() {
     setProposalResult(null)
     try {
       const res = await generateProposal({ lead_id: id, product: proposalProduct, tone: proposalTone })
-      setProposalResult(Array.isArray(res.data) ? res.data : [])
+      setProposalResult(res.data)
     } catch (e: unknown) {
       alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '提案信生成失敗')
     } finally {

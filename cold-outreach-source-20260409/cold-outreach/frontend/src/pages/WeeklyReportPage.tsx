@@ -18,7 +18,7 @@ export default function WeeklyReportPage() {
     setLoadingHistory(true)
     try {
       const res = await getWeeklyReportHistory()
-      setHistory(Array.isArray(res.data) ? res.data : [])
+      setHistory(res.data)
     } catch (e) {
       console.error(e)
     } finally {
@@ -32,7 +32,7 @@ export default function WeeklyReportPage() {
     setGenerating(true)
     try {
       const res = await generateWeeklyReport()
-      setCurrentReport(Array.isArray(res.data) ? res.data : [])
+      setCurrentReport(res.data)
       setSelectedHistoryId(null)
       await loadHistory()
     } catch (e: unknown) {
@@ -46,7 +46,7 @@ export default function WeeklyReportPage() {
   const handleLoadHistory = async (id: string) => {
     try {
       const res = await getWeeklyReport(id)
-      setCurrentReport(Array.isArray(res.data) ? res.data : [])
+      setCurrentReport(res.data)
       setSelectedHistoryId(id)
     } catch {
       alert('載入失敗')
