@@ -155,12 +155,12 @@ export default function CadencePage() {
 
   const loadCadences = useCallback(async () => {
     const res = await getCadences()
-    setCadences(res.data)
+    setCadences(Array.isArray(res.data) ? res.data : [])
   }, [])
 
   const loadEnrollments = useCallback(async (cadenceId: string) => {
     const res = await getCadenceEnrollments(cadenceId)
-    setEnrollments(res.data)
+    setEnrollments(Array.isArray(res.data) ? res.data : [])
   }, [])
 
   useEffect(() => {
@@ -216,7 +216,7 @@ export default function CadencePage() {
 
   const openEnroll = async () => {
     const res = await getLeads()
-    setLeads(res.data)
+    setLeads(Array.isArray(res.data) ? res.data : [])
     setShowEnroll(true)
   }
 

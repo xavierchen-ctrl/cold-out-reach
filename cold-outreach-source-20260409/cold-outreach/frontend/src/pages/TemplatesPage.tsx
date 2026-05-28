@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/lib/api'
 import { EmailTemplate } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -123,7 +123,7 @@ export default function TemplatesPage() {
     setLoading(true)
     try {
       const res = await getTemplates()
-      setTemplates(res.data)
+      setTemplates(Array.isArray(res.data) ? res.data : [])
     } finally {
       setLoading(false)
     }

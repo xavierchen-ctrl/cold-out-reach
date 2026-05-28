@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { getABTests, createABTest, getABTestResults, updateABTest } from '@/lib/api'
 import { ABTest, ABTestResult } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -25,7 +25,7 @@ export default function ABTestPage() {
 
   const loadTests = async () => {
     const res = await getABTests()
-    setTests(res.data)
+    setTests(Array.isArray(res.data) ? res.data : [])
   }
 
   useEffect(() => { loadTests() }, [])
@@ -48,7 +48,7 @@ export default function ABTestPage() {
 
   const handleViewResult = async (test: ABTest) => {
     const res = await getABTestResults(test.id)
-    setSelectedResult(res.data)
+    setSelectedResult(Array.isArray(res.data) ? res.data : [])
   }
 
   const handleComplete = async (test: ABTest) => {

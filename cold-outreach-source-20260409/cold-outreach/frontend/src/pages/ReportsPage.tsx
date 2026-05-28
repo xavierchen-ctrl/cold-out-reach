@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import {
   getCampaignSummary, exportDeliveryExcel, getMonthlyPdf,
   getCadences, getCadenceEnrollments,
@@ -74,7 +74,7 @@ export default function ReportsPage() {
       const cadenceList: Cadence[] = cadencesRes.data
       const statsPromises = cadenceList.slice(0, 10).map(async (c) => {
         const res = await getCadenceEnrollments(c.id)
-        const enrollments: CadenceEnrollment[] = res.data
+        const enrollments: CadenceEnrollment[] = (Array.isArray(res.data) ? res.data : [])
         const completed = enrollments.filter(e => e.status === 'completed').length
         const completion_rate = enrollments.length > 0
           ? Math.round((completed / enrollments.length) * 100)
