@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   getLead, updateLead, updateLeadStatus, getActivities, createActivity,
@@ -188,7 +188,7 @@ export default function LeadDetailPage() {
     loadAttachments()
     loadCadenceEnrollments()
     loadCalls()
-    getTemplates().then(r => setTemplates(r.data)).catch(() => {})
+    getTemplates().then(r => setTemplates(Array.isArray(r.data) ? r.data : [])).catch(() => {})
   }, [loadLead, loadActivities, loadOpenStatus, loadContacts, loadTags, loadAttachments, loadCadenceEnrollments, loadCalls])
 
   const save = async () => {

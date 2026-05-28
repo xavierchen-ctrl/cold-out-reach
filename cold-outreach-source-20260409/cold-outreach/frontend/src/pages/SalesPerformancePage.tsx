@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer
@@ -40,7 +40,7 @@ export default function SalesPerformancePage() {
   useEffect(() => {
     load()
     if (user?.role === 'admin') {
-      getUsers().then(r => setUsers(r.data)).catch(() => {})
+      getUsers().then(r => setUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {})
     }
   }, [load, user])
 
