@@ -173,6 +173,19 @@ app.include_router(enrich.router)
 app.include_router(icp.router)
 app.include_router(signals.router)
 
+
+# ── One-time DB init endpoint (safe: only creates if not exists) ───────────────
+@app.post("/api/admin/init-db")
+def init_db():
+    try:
+        Base.metadata.create_all(bind=engine)
+        from sqlalchemy import inspect
+        tables = inspect(engine).get_table_names()
+        return {"ok": True, "tables": tables}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 # ── Static files (frontend build) ─────────────────────────────────────────────
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 

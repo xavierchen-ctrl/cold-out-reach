@@ -48,7 +48,7 @@ export default function ABTestPage() {
 
   const handleViewResult = async (test: ABTest) => {
     const res = await getABTestResults(test.id)
-    setSelectedResult(Array.isArray(res.data) ? res.data : [])
+    setSelectedResult(res.data)
   }
 
   const handleComplete = async (test: ABTest) => {
