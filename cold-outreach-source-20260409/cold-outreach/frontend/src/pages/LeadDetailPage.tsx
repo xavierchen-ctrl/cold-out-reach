@@ -124,8 +124,8 @@ export default function LeadDetailPage() {
   const loadLead = useCallback(async () => {
     if (!id) return
     const res = await getLead(id)
-    setLead(res.data)
-    setForm(res.data)
+    setLead(Array.isArray(res.data) ? res.data : [])
+    setForm(Array.isArray(res.data) ? res.data : [])
     setEmailTo(res.data.email || '')
     setCapitalInput(res.data.capital_amount || '')
   }, [id])
@@ -133,7 +133,7 @@ export default function LeadDetailPage() {
   const loadActivities = useCallback(async () => {
     if (!id) return
     const res = await getActivities(id)
-    setActivities(res.data)
+    setActivities(Array.isArray(res.data) ? res.data : [])
   }, [id])
 
   const loadOpenStatus = useCallback(async () => {
@@ -152,7 +152,7 @@ export default function LeadDetailPage() {
 
   const loadContacts = useCallback(async () => {
     if (!id) return
-    try { const res = await getContacts(id); setContacts(res.data) } catch { /* ignore */ }
+    try { const res = await getContacts(id); setContacts(Array.isArray(res.data) ? res.data : []) } catch { /* ignore */ }
   }, [id])
 
   const loadTags = useCallback(async () => {
@@ -166,17 +166,17 @@ export default function LeadDetailPage() {
 
   const loadAttachments = useCallback(async () => {
     if (!id) return
-    try { const res = await getAttachments(id); setAttachments(res.data) } catch { /* ignore */ }
+    try { const res = await getAttachments(id); setAttachments(Array.isArray(res.data) ? res.data : []) } catch { /* ignore */ }
   }, [id])
 
   const loadCadenceEnrollments = useCallback(async () => {
     if (!id) return
-    try { const res = await getLeadCadences(id); setCadenceEnrollments(res.data) } catch { /* ignore */ }
+    try { const res = await getLeadCadences(id); setCadenceEnrollments(Array.isArray(res.data) ? res.data : []) } catch { /* ignore */ }
   }, [id])
 
   const loadCalls = useCallback(async () => {
     if (!id) return
-    try { const res = await getCalls(id); setCalls(res.data) } catch { /* ignore */ }
+    try { const res = await getCalls(id); setCalls(Array.isArray(res.data) ? res.data : []) } catch { /* ignore */ }
   }, [id])
 
   useEffect(() => {
@@ -230,7 +230,7 @@ export default function LeadDetailPage() {
     setLushaMsg('啟動中...')
     try {
       const res = await enrichLushaPhone([id], 1)
-      const jobId = res.data.job_id
+      const jobId = (Array.isArray(res.data) ? res.data : []).job_id
       setLushaMsg('查詢中...')
       const poll = async () => {
         const s = await enrichLushaStatus(jobId)
@@ -265,7 +265,7 @@ export default function LeadDetailPage() {
     setEnriching(true)
     try {
       const res = await enrichCompany(lead.company_name, id)
-      const data = res.data
+      const data = (Array.isArray(res.data) ? res.data : [])
       setForm(f => ({
         ...f,
         industry: f.industry || data.industry || f.industry,
@@ -414,7 +414,7 @@ export default function LeadDetailPage() {
     setProposalResult(null)
     try {
       const res = await generateProposal({ lead_id: id, product: proposalProduct, tone: proposalTone })
-      setProposalResult(res.data)
+      setProposalResult(Array.isArray(res.data) ? res.data : [])
     } catch (e: unknown) {
       alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '提案信生成失敗')
     } finally {

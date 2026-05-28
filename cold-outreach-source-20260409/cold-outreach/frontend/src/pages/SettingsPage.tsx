@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser } from '@/lib/api'
 import { Tag, Webhook, WebhookLog, User as UserType } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -68,7 +68,7 @@ function TagsTab() {
 
   const loadTags = async () => {
     const res = await getTags()
-    setTags(res.data)
+    setTags(Array.isArray(res.data) ? res.data : [])
   }
   useEffect(() => { loadTags() }, [])
 
@@ -175,7 +175,7 @@ function WebhooksTab() {
 
   const loadWebhooks = async () => {
     const res = await getWebhooks()
-    setWebhooks(res.data)
+    setWebhooks(Array.isArray(res.data) ? res.data : [])
   }
   useEffect(() => { loadWebhooks() }, [])
 
@@ -438,7 +438,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
   const loadUsers = async () => {
     try {
       const res = await getUsers()
-      setUsers(res.data)
+      setUsers(Array.isArray(res.data) ? res.data : [])
     } catch {}
   }
   useEffect(() => { loadUsers() }, [])

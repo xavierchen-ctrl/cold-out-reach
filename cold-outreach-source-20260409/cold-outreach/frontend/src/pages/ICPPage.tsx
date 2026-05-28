@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { ICPProfile } from '@/types'
 import { getICPs, createICP, updateICP, deleteICP } from '@/lib/api'
 import { Button } from '@/components/ui/button'
@@ -34,7 +34,7 @@ export default function ICPPage() {
     setLoading(true)
     try {
       const res = await getICPs()
-      setProfiles(res.data)
+      setProfiles(Array.isArray(res.data) ? res.data : [])
     } finally {
       setLoading(false)
     }

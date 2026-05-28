@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback } from 'react'
 import { getDueSteps, advanceEnrollment, skipStep, sendEmail, getGmailAuthUrl } from '@/lib/api'
 import { CadenceEnrollment, CadenceStepType } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -39,7 +39,7 @@ export default function TodayPage() {
     setLoading(true)
     try {
       const res = await getDueSteps()
-      setDueItems(res.data)
+      setDueItems(Array.isArray(res.data) ? res.data : [])
     } finally {
       setLoading(false)
     }

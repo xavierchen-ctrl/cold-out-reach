@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect } from 'react'
 import { generateWeeklyReport, getWeeklyReportHistory, getWeeklyReport } from '@/lib/api'
 import { WeeklyReport } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,7 @@ export default function WeeklyReportPage() {
     setLoadingHistory(true)
     try {
       const res = await getWeeklyReportHistory()
-      setHistory(res.data)
+      setHistory(Array.isArray(res.data) ? res.data : [])
     } catch (e) {
       console.error(e)
     } finally {
@@ -32,7 +32,7 @@ export default function WeeklyReportPage() {
     setGenerating(true)
     try {
       const res = await generateWeeklyReport()
-      setCurrentReport(res.data)
+      setCurrentReport(Array.isArray(res.data) ? res.data : [])
       setSelectedHistoryId(null)
       await loadHistory()
     } catch (e: unknown) {
@@ -46,7 +46,7 @@ export default function WeeklyReportPage() {
   const handleLoadHistory = async (id: string) => {
     try {
       const res = await getWeeklyReport(id)
-      setCurrentReport(res.data)
+      setCurrentReport(Array.isArray(res.data) ? res.data : [])
       setSelectedHistoryId(id)
     } catch {
       alert('載入失敗')

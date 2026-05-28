@@ -31,7 +31,7 @@ export default function SalesPerformancePage() {
     setLoading(true)
     try {
       const res = await getSalesPerformance(uid)
-      setPerf(res.data)
+      setPerf(Array.isArray(res.data) ? res.data : [])
     } finally {
       setLoading(false)
     }
