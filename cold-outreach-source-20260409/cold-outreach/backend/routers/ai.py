@@ -1,6 +1,7 @@
 ﻿import os
 import json
 import re
+from datetime import timedelta
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -11,6 +12,7 @@ from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType
 from schemas import DraftRequest, DraftResponse
 from auth import get_current_user
+from utils import now_tw
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -436,8 +438,6 @@ def pipeline_health(
     if not GEMINI_API_KEY:
         raise HTTPException(status_code=503, detail="Gemini API key not configured")
 
-    from datetime import datetime, timedelta
-from utils import now_tw
     from sqlalchemy import func
 
     total = db.query(Lead).count()
