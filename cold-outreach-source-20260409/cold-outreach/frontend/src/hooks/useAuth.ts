@@ -5,7 +5,7 @@ import { User } from '@/types'
 // ── DEV BYPASS ────────────────────────────────────────────────────────────────
 // 設為 true 可直接跳過登入，使用假的 admin 帳號進入系統
 // 上線前請改回 false
-const DEV_BYPASS = true
+const DEV_BYPASS = false
 
 const DEV_USER: User = {
   id: 'dev-admin',
