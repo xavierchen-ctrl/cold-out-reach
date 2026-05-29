@@ -32,6 +32,8 @@ export const login = (email: string, password: string) =>
   api.post('/auth/login', { email, password })
 export const logout = () => api.post('/auth/logout')
 export const getMe = () => api.get('/auth/me')
+export const changePassword = (current_password: string, new_password: string) =>
+  api.post('/auth/me/change-password', { current_password, new_password })
 
 // ── Leads ─────────────────────────────────────────────────────────────────────
 export const getLeads = (params?: Record<string, string | number>) =>

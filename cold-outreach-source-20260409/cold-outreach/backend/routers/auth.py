@@ -149,6 +149,28 @@ def update_user(
     return user
 
 
+class ChangePasswordBody(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/me/change-password")
+def change_password(
+    body: ChangePasswordBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if not verify_password(body.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="目前密碼不正確")
+    try:
+        validate_password(body.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    current_user.hashed_password = hash_password(body.new_password)
+    db.commit()
+    return {"message": "密碼已更新"}
+
+
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: str,

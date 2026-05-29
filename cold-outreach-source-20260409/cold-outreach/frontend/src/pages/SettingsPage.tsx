@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam } from '@/lib/api'
+import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword } from '@/lib/api'
 import { Tag, Webhook, WebhookLog, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -813,15 +813,14 @@ function ProfileTab() {
     }
     setSaving(true)
     try {
-      // This would call a change password API endpoint
-      // For now, just simulate
-      await new Promise(r => setTimeout(r, 500))
+      await changePassword(currentPw, newPw)
       setMsg('✅ 密碼已更新')
       setCurrentPw('')
       setNewPw('')
       setConfirmPw('')
-    } catch {
-      setMsg('❌ 更新失敗')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      setMsg(`❌ ${err?.response?.data?.detail || '更新失敗'}`)
     } finally {
       setSaving(false)
     }
