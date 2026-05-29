@@ -623,10 +623,10 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
             </div>
             <div>
               <Label>部門</Label>
-              <Select value={editForm.team_id} onValueChange={v => setEditForm(f => ({ ...f, team_id: v }))}>
+              <Select value={editForm.team_id || '__none__'} onValueChange={v => setEditForm(f => ({ ...f, team_id: v === '__none__' ? '' : v }))}>
                 <SelectTrigger className="mt-1"><SelectValue placeholder="不指定部門" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">不指定</SelectItem>
+                  <SelectItem value="__none__">不指定</SelectItem>
                   {teams.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
                 </SelectContent>
               </Select>
