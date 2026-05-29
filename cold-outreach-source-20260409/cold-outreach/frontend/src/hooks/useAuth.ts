@@ -12,6 +12,7 @@ const DEV_USER: User = {
   email: 'dev@local',
   name: 'Dev Admin',
   role: 'admin',
+  team_id: null,
   created_at: new Date().toISOString(),
 }
 // ─────────────────────────────────────────────────────────────────────────────
