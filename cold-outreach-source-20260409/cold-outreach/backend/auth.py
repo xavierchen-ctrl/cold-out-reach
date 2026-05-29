@@ -12,8 +12,21 @@ JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 8
 
-ALLOWED_DOMAINS = {"wavenet.com.tw"}
-ALLOWED_EMAILS = {"joelou989@gmail.com"}
+ALLOWED_DOMAINS = {"wavenet.com.tw", "partner.wavenet.com.tw"}
+ALLOWED_EMAILS = {
+    "joelou989@gmail.com",
+    "gr920418@gmail.com",
+    "liuchery10922@gmail.com",
+    "xhes.we.17@gmail.com",
+    "hsin64michelle@gmail.com",
+    "960012jeffery@gmail.com",
+    "kejichen20241017@gmail.com",
+    "wolf19387@gmail.com",
+    "jiaweihu34@gmail.com",
+    "rouyuuz901210@gmail.com",
+    "prototype55194158@gmail.com",
+    "luffy880327@gmail.com",
+}
 
 
 def is_allowed_email(email: str) -> bool:
