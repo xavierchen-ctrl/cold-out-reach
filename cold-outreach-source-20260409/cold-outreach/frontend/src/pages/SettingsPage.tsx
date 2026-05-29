@@ -439,6 +439,9 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'sales' })
   const [editForm, setEditForm] = useState({ name: '', role: 'sales', password: '', team_id: '' })
   const [saving, setSaving] = useState(false)
+  const [filterName, setFilterName] = useState('')
+  const [filterEmail, setFilterEmail] = useState('')
+  const [filterRole, setFilterRole] = useState('__all__')
 
   const loadData = async () => {
     try {
@@ -450,6 +453,13 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
   useEffect(() => { loadData() }, [])
 
   const teamName = (id: string | null) => teams.find(t => t.id === id)?.name ?? '—'
+
+  const filteredUsers = users.filter(u => {
+    if (filterName && !u.name.toLowerCase().includes(filterName.toLowerCase())) return false
+    if (filterEmail && !u.email.toLowerCase().includes(filterEmail.toLowerCase())) return false
+    if (filterRole !== '__all__' && u.role !== filterRole) return false
+    return true
+  })
 
   const handleCreate = async () => {
     if (!form.name || !form.email || !form.password) return
@@ -513,6 +523,36 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
         </Button>
       </div>
 
+      <div className="flex gap-2 mb-3 flex-wrap">
+        <Input
+          placeholder="搜尋姓名..."
+          value={filterName}
+          onChange={e => setFilterName(e.target.value)}
+          className="w-40"
+        />
+        <Input
+          placeholder="搜尋 Email..."
+          value={filterEmail}
+          onChange={e => setFilterEmail(e.target.value)}
+          className="w-48"
+        />
+        <Select value={filterRole} onValueChange={setFilterRole}>
+          <SelectTrigger className="w-32"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__">全部權限</SelectItem>
+            <SelectItem value="sales">業務</SelectItem>
+            <SelectItem value="manager">主管</SelectItem>
+            <SelectItem value="admin">管理員</SelectItem>
+          </SelectContent>
+        </Select>
+        {(filterName || filterEmail || filterRole !== '__all__') && (
+          <Button variant="outline" size="sm" onClick={() => { setFilterName(''); setFilterEmail(''); setFilterRole('__all__') }}>
+            清除篩選
+          </Button>
+        )}
+        <span className="text-sm text-muted-foreground self-center ml-auto">{filteredUsers.length} / {users.length} 人</span>
+      </div>
+
       <div className="bg-white border rounded-lg overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-muted-foreground">
@@ -526,7 +566,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
             </tr>
           </thead>
           <tbody className="divide-y">
-            {users.map(u => (
+            {filteredUsers.map(u => (
               <tr key={u.id} className="hover:bg-muted/20">
                 <td className="px-4 py-3 font-medium">
                   {u.name}
