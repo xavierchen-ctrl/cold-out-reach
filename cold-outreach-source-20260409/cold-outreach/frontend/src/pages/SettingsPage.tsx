@@ -1,6 +1,6 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser } from '@/lib/api'
-import { Tag, Webhook, WebhookLog, User as UserType } from '@/types'
+import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam } from '@/lib/api'
+import { Tag, Webhook, WebhookLog, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -19,7 +19,7 @@ const WEBHOOK_EVENTS = [
   'lead.status_changed', 'lead.won', 'lead.lost', 'email.replied', 'meeting.scheduled',
 ]
 
-type SettingsTab = 'tags' | 'webhooks' | 'line' | 'profile' | 'users'
+type SettingsTab = 'tags' | 'webhooks' | 'line' | 'profile' | 'users' | 'teams'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -30,7 +30,10 @@ export default function SettingsPage() {
     { key: 'webhooks', label: 'Webhook', icon: Globe },
     { key: 'line', label: 'LINE Notify', icon: Bell },
     { key: 'profile', label: '個人資料', icon: User },
-    ...(user?.role === 'admin' ? [{ key: 'users', label: '帳號管理', icon: Users }] : []),
+    ...(user?.role === 'admin' ? [
+      { key: 'users', label: '帳號管理', icon: Users },
+      { key: 'teams', label: '部門管理', icon: Users },
+    ] : []),
   ]
 
   return (
@@ -54,6 +57,7 @@ export default function SettingsPage() {
       {tab === 'line' && <LineNotifyTab />}
       {tab === 'profile' && <ProfileTab />}
       {tab === 'users' && user?.role === 'admin' && <UsersTab currentUserId={user.id} />}
+      {tab === 'teams' && user?.role === 'admin' && <TeamsTab />}
     </div>
   )
 }
@@ -429,19 +433,23 @@ const ROLE_LABELS: Record<string, string> = {
 
 function UsersTab({ currentUserId }: { currentUserId: string }) {
   const [users, setUsers] = useState<UserType[]>([])
+  const [teams, setTeams] = useState<Team[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [editingUser, setEditingUser] = useState<UserType | null>(null)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'sales' })
-  const [editForm, setEditForm] = useState({ name: '', role: 'sales', password: '' })
+  const [editForm, setEditForm] = useState({ name: '', role: 'sales', password: '', team_id: '' })
   const [saving, setSaving] = useState(false)
 
-  const loadUsers = async () => {
+  const loadData = async () => {
     try {
-      const res = await getUsers()
-      setUsers(Array.isArray(res.data) ? res.data : [])
+      const [uRes, tRes] = await Promise.all([getUsers(), getTeams()])
+      setUsers(Array.isArray(uRes.data) ? uRes.data : [])
+      setTeams(Array.isArray(tRes.data) ? tRes.data : [])
     } catch {}
   }
-  useEffect(() => { loadUsers() }, [])
+  useEffect(() => { loadData() }, [])
+
+  const teamName = (id: string | null) => teams.find(t => t.id === id)?.name ?? '—'
 
   const handleCreate = async () => {
     if (!form.name || !form.email || !form.password) return
@@ -454,7 +462,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
       await createUser(form)
       setForm({ name: '', email: '', password: '', role: 'sales' })
       setShowCreate(false)
-      await loadUsers()
+      await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
       alert(err?.response?.data?.detail || '建立失敗')
@@ -467,14 +475,15 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
     if (!editingUser) return
     setSaving(true)
     try {
-      const payload: { name?: string; role?: string; password?: string } = {
+      const payload: { name?: string; role?: string; password?: string; team_id?: string | null } = {
         name: editForm.name || undefined,
         role: editForm.role || undefined,
+        team_id: editForm.team_id || null,
       }
       if (editForm.password) payload.password = editForm.password
       await updateUser(editingUser.id, payload)
       setEditingUser(null)
-      await loadUsers()
+      await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
       alert(err?.response?.data?.detail || '更新失敗')
@@ -488,7 +497,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
     if (!confirm(`確定刪除帳號 ${user.name}（${user.email}）？`)) return
     try {
       await deleteUser(user.id)
-      await loadUsers()
+      await loadData()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
       alert(err?.response?.data?.detail || '刪除失敗')
@@ -511,6 +520,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
               <th className="px-4 py-3 text-left font-medium">姓名</th>
               <th className="px-4 py-3 text-left font-medium">Email</th>
               <th className="px-4 py-3 text-left font-medium">角色</th>
+              <th className="px-4 py-3 text-left font-medium">部門</th>
               <th className="px-4 py-3 text-left font-medium">建立時間</th>
               <th className="px-4 py-3 text-left font-medium w-20"></th>
             </tr>
@@ -528,6 +538,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                     {ROLE_LABELS[u.role] || u.role}
                   </Badge>
                 </td>
+                <td className="px-4 py-3 text-sm text-muted-foreground">{teamName(u.team_id)}</td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">
                   {new Date(u.created_at).toLocaleDateString('zh-TW')}
                 </td>
@@ -535,7 +546,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => {
                       setEditingUser(u)
-                      setEditForm({ name: u.name, role: u.role, password: '' })
+                      setEditForm({ name: u.name, role: u.role, password: '', team_id: u.team_id ?? '' })
                     }}>
                       ✏️
                     </Button>
@@ -611,12 +622,160 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
               </Select>
             </div>
             <div>
+              <Label>部門</Label>
+              <Select value={editForm.team_id} onValueChange={v => setEditForm(f => ({ ...f, team_id: v }))}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="不指定部門" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">不指定</SelectItem>
+                  {teams.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
               <Label>新密碼 <span className="text-muted-foreground font-normal text-xs">（留空表示不修改）</span></Label>
               <Input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} className="mt-1" placeholder="不修改請留空" />
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setEditingUser(null)}>取消</Button>
               <Button onClick={handleUpdate} disabled={saving}>
+                {saving ? '儲存中...' : '儲存'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  )
+}
+
+// ── Teams Tab (Admin only) ────────────────────────────────────────────────────
+function TeamsTab() {
+  const [teams, setTeams] = useState<Team[]>([])
+  const [showCreate, setShowCreate] = useState(false)
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null)
+  const [newName, setNewName] = useState('')
+  const [editName, setEditName] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [memberCounts, setMemberCounts] = useState<Record<string, number>>({})
+
+  const loadTeams = async () => {
+    try {
+      const res = await getTeams()
+      const list: Team[] = Array.isArray(res.data) ? res.data : []
+      setTeams(list)
+      const uRes = await getUsers()
+      const users: UserType[] = Array.isArray(uRes.data) ? uRes.data : []
+      const counts: Record<string, number> = {}
+      list.forEach(t => { counts[t.id] = users.filter(u => u.team_id === t.id).length })
+      setMemberCounts(counts)
+    } catch {}
+  }
+  useEffect(() => { loadTeams() }, [])
+
+  const handleCreate = async () => {
+    if (!newName.trim()) return
+    setSaving(true)
+    try {
+      await createTeam({ name: newName.trim() })
+      setNewName('')
+      setShowCreate(false)
+      await loadTeams()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      alert(err?.response?.data?.detail || '建立失敗')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleUpdate = async () => {
+    if (!editingTeam || !editName.trim()) return
+    setSaving(true)
+    try {
+      await updateTeam(editingTeam.id, { name: editName.trim() })
+      setEditingTeam(null)
+      await loadTeams()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      alert(err?.response?.data?.detail || '更新失敗')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleDelete = async (team: Team) => {
+    if (!confirm(`確定刪除部門「${team.name}」？成員將不再屬於任何部門。`)) return
+    try {
+      await deleteTeam(team.id)
+      await loadTeams()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      alert(err?.response?.data?.detail || '刪除失敗')
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold">部門管理</h2>
+        <Button size="sm" onClick={() => setShowCreate(true)}>
+          <Plus className="w-4 h-4 mr-1" /> 新增部門
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        {teams.map(t => (
+          <div key={t.id} className="border rounded-lg p-4 bg-white flex items-center justify-between">
+            <div>
+              <span className="font-medium">{t.name}</span>
+              <span className="ml-3 text-sm text-muted-foreground">{memberCounts[t.id] ?? 0} 位成員</span>
+            </div>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { setEditingTeam(t); setEditName(t.name) }}>
+                ✏️
+              </Button>
+              <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-red-500 hover:text-red-700" onClick={() => handleDelete(t)}>
+                <Trash2 className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        ))}
+        {teams.length === 0 && (
+          <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-white">
+            尚無部門，點擊「新增部門」開始建立
+          </div>
+        )}
+      </div>
+
+      <Dialog open={showCreate} onOpenChange={setShowCreate}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>新增部門</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>部門名稱 *</Label>
+              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="例如：行銷業務一部" className="mt-1" />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setShowCreate(false)}>取消</Button>
+              <Button onClick={handleCreate} disabled={saving || !newName.trim()}>
+                {saving ? '建立中...' : '建立'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingTeam} onOpenChange={() => setEditingTeam(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>編輯部門</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>部門名稱</Label>
+              <Input value={editName} onChange={e => setEditName(e.target.value)} className="mt-1" />
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={() => setEditingTeam(null)}>取消</Button>
+              <Button onClick={handleUpdate} disabled={saving || !editName.trim()}>
                 {saving ? '儲存中...' : '儲存'}
               </Button>
             </div>

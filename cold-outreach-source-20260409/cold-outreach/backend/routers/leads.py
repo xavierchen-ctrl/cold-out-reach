@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog
 from schemas import LeadCreate, LeadUpdate, LeadStatusUpdate, LeadOut, ActivityOut
-from auth import get_current_user
+from auth import get_current_user, get_visible_user_ids
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 
-def _check_access(lead: Lead, user: User):
-    if user.role == UserRole.sales and str(lead.assigned_to) != str(user.id):
+def _check_access(lead: Lead, user: User, db: Session):
+    visible_ids = get_visible_user_ids(user, db)
+    if visible_ids is not None and lead.assigned_to not in visible_ids:
         raise HTTPException(status_code=403, detail="Access denied")
 
 
@@ -30,8 +31,9 @@ def list_leads(
     current_user: User = Depends(get_current_user),
 ):
     q = db.query(Lead)
-    if current_user.role == UserRole.sales:
-        q = q.filter(Lead.assigned_to == current_user.id)
+    visible_ids = get_visible_user_ids(current_user, db)
+    if visible_ids is not None:
+        q = q.filter(Lead.assigned_to.in_(visible_ids))
     if status:
         q = q.filter(Lead.status == status)
     if assigned_to and current_user.role == UserRole.admin:
@@ -90,7 +92,7 @@ def get_lead(lead_id: UUID, db: Session = Depends(get_db), current_user: User = 
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    _check_access(lead, current_user)
+    _check_access(lead, current_user, db)
     return lead
 
 
@@ -104,7 +106,7 @@ def update_lead(
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    _check_access(lead, current_user)
+    _check_access(lead, current_user, db)
 
     old_status = lead.status
     for field, value in body.model_dump(exclude_unset=True).items():
@@ -146,7 +148,7 @@ def update_status(
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    _check_access(lead, current_user)
+    _check_access(lead, current_user, db)
 
     old_status = lead.status
     lead.status = body.status

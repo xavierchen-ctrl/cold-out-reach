@@ -42,6 +42,16 @@ class ScraperJobStatus(str, enum.Enum):
     failed = "failed"
 
 
+class Team(Base):
+    __tablename__ = "teams"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String(255), nullable=False, unique=True)
+    created_at = Column(DateTime, default=now_tw)
+
+    members = relationship("User", back_populates="team")
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -51,8 +61,10 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.sales)
     gmail_token = Column(Text, nullable=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
     created_at = Column(DateTime, default=now_tw)
 
+    team = relationship("Team", back_populates="members")
     leads = relationship("Lead", back_populates="assigned_user", foreign_keys="Lead.assigned_to")
     activities = relationship("LeadActivity", back_populates="creator")
 

@@ -140,9 +140,16 @@ export const getPipelineHealthCached = (refresh = false) =>
 export const getUsers = () => api.get('/auth/users')
 export const createUser = (data: { name: string; email: string; password: string; role: string }) =>
   api.post('/auth/users', data)
-export const updateUser = (id: string, data: { name?: string; role?: string; password?: string }) =>
+export const updateUser = (id: string, data: { name?: string; role?: string; password?: string; team_id?: string | null }) =>
   api.put(`/auth/users/${id}`, data)
 export const deleteUser = (id: string) => api.delete(`/auth/users/${id}`)
+
+// ── Teams ─────────────────────────────────────────────────────────────────────
+export const getTeams = () => api.get('/teams')
+export const createTeam = (data: { name: string }) => api.post('/teams', data)
+export const updateTeam = (id: string, data: { name: string }) => api.put(`/teams/${id}`, data)
+export const deleteTeam = (id: string) => api.delete(`/teams/${id}`)
+export const getTeamMembers = (id: string) => api.get(`/teams/${id}/members`)
 
 // ── Contacts ──────────────────────────────────────────────────────────────────
 export const getContacts = (leadId: string) => api.get(`/leads/${leadId}/contacts`)

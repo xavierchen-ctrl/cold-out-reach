@@ -1,5 +1,6 @@
 import os
 from typing import List, Optional
+from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
@@ -93,6 +94,7 @@ class UpdateUserBody(BaseModel):
     name: Optional[str] = None
     role: Optional[UserRole] = None
     password: Optional[str] = None
+    team_id: Optional[UUID] = None
 
 
 @router.post("/users", response_model=UserOut)
@@ -134,6 +136,8 @@ def update_user(
         user.name = body.name
     if body.role is not None:
         user.role = body.role
+    if body.team_id is not None:
+        user.team_id = body.team_id
     if body.password is not None:
         try:
             validate_password(body.password)

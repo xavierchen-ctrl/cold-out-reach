@@ -14,7 +14,7 @@ import models  # register all ORM models
 from routers import auth, leads, activities, gmail, ai, stats, scraper, scoring, bulk, sequences
 from routers import templates, email_scheduler, tracking, reports
 from routers import contacts, tags, attachments, ab_test, webhooks, notifications, analytics, keyword_tracker, weekly_report
-from routers import cadence, call_log, enrich, icp, signals
+from routers import cadence, call_log, enrich, icp, signals, teams
 
 
 @asynccontextmanager
@@ -119,6 +119,15 @@ async def lifespan(app: FastAPI):
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS tax_id VARCHAR(20)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS representative_name VARCHAR(255)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS capital_amount VARCHAR(50)"))
+            # Team-based RBAC
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS teams (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    name VARCHAR(255) NOT NULL UNIQUE,
+                    created_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id)"))
             conn.commit()
     except Exception as e:
         print(f"Migration skip: {e}")
@@ -172,6 +181,7 @@ app.include_router(call_log.router)
 app.include_router(enrich.router)
 app.include_router(icp.router)
 app.include_router(signals.router)
+app.include_router(teams.router)
 
 
 # ── One-time DB init endpoint (safe: only creates if not exists) ───────────────

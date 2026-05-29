@@ -11,7 +11,7 @@ import google.generativeai as genai
 from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole
 from schemas import StatsOverview, SalesStat, FunnelStage
-from auth import get_current_user, require_admin
+from auth import get_current_user, require_admin, get_visible_user_ids
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 _suggestion_cache: dict = {"ts": 0, "data": []}
@@ -28,8 +28,9 @@ def overview(
     current_user: User = Depends(get_current_user),
 ):
     q = db.query(Lead)
-    if current_user.role == UserRole.sales:
-        q = q.filter(Lead.assigned_to == current_user.id)
+    visible_ids = get_visible_user_ids(current_user, db)
+    if visible_ids is not None:
+        q = q.filter(Lead.assigned_to.in_(visible_ids))
 
     total = q.count()
     counts = {s.value: 0 for s in LeadStatus}
@@ -41,8 +42,8 @@ def overview(
         LeadActivity.type == ActivityType.email_sent,
         LeadActivity.created_at >= week_ago,
     )
-    if current_user.role == UserRole.sales:
-        email_q = email_q.filter(LeadActivity.created_by == current_user.id)
+    if visible_ids is not None:
+        email_q = email_q.filter(LeadActivity.created_by.in_(visible_ids))
 
     return StatsOverview(
         total_leads=total,
@@ -90,8 +91,9 @@ def funnel(
     current_user: User = Depends(get_current_user),
 ):
     q = db.query(Lead.status, func.count()).group_by(Lead.status)
-    if current_user.role == UserRole.sales:
-        q = q.filter(Lead.assigned_to == current_user.id)
+    visible_ids = get_visible_user_ids(current_user, db)
+    if visible_ids is not None:
+        q = q.filter(Lead.assigned_to.in_(visible_ids))
     raw = {row[0].value: row[1] for row in q.all()}
     return [FunnelStage(status=s, count=raw.get(s, 0)) for s in FUNNEL_ORDER]
 
@@ -102,6 +104,7 @@ def trend(
     current_user: User = Depends(get_current_user),
 ):
     """最近 14 天每日新增名單數 + 發信數"""
+    visible_ids = get_visible_user_ids(current_user, db)
     result = []
     for i in range(13, -1, -1):
         day_start = now_tw().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=i)
@@ -112,9 +115,9 @@ def trend(
             LeadActivity.created_at >= day_start,
             LeadActivity.created_at < day_end,
         )
-        if current_user.role == UserRole.sales:
-            lq = lq.filter(Lead.assigned_to == current_user.id)
-            eq = eq.filter(LeadActivity.created_by == current_user.id)
+        if visible_ids is not None:
+            lq = lq.filter(Lead.assigned_to.in_(visible_ids))
+            eq = eq.filter(LeadActivity.created_by.in_(visible_ids))
         result.append({
             "date": day_start.strftime("%m/%d"),
             "new_leads": lq.count(),
@@ -132,8 +135,9 @@ def stale_leads(
     threshold = now_tw() - timedelta(days=7)
     active_statuses = [LeadStatus.contacted, LeadStatus.replied, LeadStatus.meeting_scheduled, LeadStatus.new]
     q = db.query(Lead).filter(Lead.status.in_(active_statuses))
-    if current_user.role == UserRole.sales:
-        q = q.filter(Lead.assigned_to == current_user.id)
+    visible_ids = get_visible_user_ids(current_user, db)
+    if visible_ids is not None:
+        q = q.filter(Lead.assigned_to.in_(visible_ids))
 
     stale = []
     for lead in q.order_by(Lead.updated_at).limit(50).all():

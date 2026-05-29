@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, Lead, LeadActivity, UserRole
 from schemas import ActivityCreate, ActivityOut
-from auth import get_current_user
+from auth import get_current_user, get_visible_user_ids
 
 router = APIRouter(prefix="/api/leads", tags=["activities"])
 
@@ -14,7 +14,8 @@ def _check_lead_access(lead_id: UUID, user: User, db: Session) -> Lead:
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
-    if user.role == UserRole.sales and str(lead.assigned_to) != str(user.id):
+    visible_ids = get_visible_user_ids(user, db)
+    if visible_ids is not None and lead.assigned_to not in visible_ids:
         raise HTTPException(status_code=403, detail="Access denied")
     return lead
 
