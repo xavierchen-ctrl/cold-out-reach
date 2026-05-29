@@ -7,8 +7,36 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Trash2, Plus, Globe, Tag as TagIcon, Bell, User, TestTube2, Zap, Users } from 'lucide-react'
+import { Trash2, Plus, Globe, Tag as TagIcon, Bell, User, TestTube2, Zap, Users, Eye, EyeOff } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+
+function PasswordInput({ value, onChange, placeholder, className }: {
+  value: string
+  onChange: (e: React.ChangeEvent<HTMLInputElement>) => void
+  placeholder?: string
+  className?: string
+}) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="relative">
+      <Input
+        type={show ? 'text' : 'password'}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        className={className}
+      />
+      <button
+        type="button"
+        onClick={() => setShow(v => !v)}
+        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-gray-700"
+        tabIndex={-1}
+      >
+        {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+      </button>
+    </div>
+  )
+}
 
 const PRESET_COLORS = [
   '#6366f1', '#ec4899', '#f59e0b', '#10b981', '#3b82f6',
@@ -618,7 +646,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
             </div>
             <div>
               <Label>密碼 *</Label>
-              <Input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} className="mt-1" />
+              <PasswordInput value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} className="mt-1" />
             </div>
             <div>
               <Label>角色</Label>
@@ -673,7 +701,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
             </div>
             <div>
               <Label>新密碼 <span className="text-muted-foreground font-normal text-xs">（留空表示不修改）</span></Label>
-              <Input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} className="mt-1" placeholder="不修改請留空" />
+              <PasswordInput value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} className="mt-1" placeholder="不修改請留空" />
             </div>
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={() => setEditingUser(null)}>取消</Button>
@@ -873,15 +901,15 @@ function ProfileTab() {
         <h3 className="text-sm font-medium text-gray-700">更改密碼</h3>
         <div>
           <Label>目前密碼</Label>
-          <Input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} className="mt-1" />
+          <PasswordInput value={currentPw} onChange={e => setCurrentPw(e.target.value)} className="mt-1" />
         </div>
         <div>
           <Label>新密碼</Label>
-          <Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} className="mt-1" />
+          <PasswordInput value={newPw} onChange={e => setNewPw(e.target.value)} className="mt-1" />
         </div>
         <div>
           <Label>確認新密碼</Label>
-          <Input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className="mt-1" />
+          <PasswordInput value={confirmPw} onChange={e => setConfirmPw(e.target.value)} className="mt-1" />
         </div>
         {msg && <p className="text-sm">{msg}</p>}
         <Button onClick={handleChangePw} disabled={saving || !currentPw || !newPw || !confirmPw}>
