@@ -648,11 +648,13 @@ def _get_aspnet_pager_info(html: str) -> dict:
     """
     從 ASP.NET 分頁取得：目前頁、總頁數、__EVENTTARGET。
     回傳 {'current': N, 'total': N, 'target': '...'}
+    total=999 表示有下一頁但不知道總頁數（由呼叫端在空結果時停止）
     """
     soup = BeautifulSoup(html, 'lxml')
     current_page = 1
     total_pages = 1
     event_target = ''
+    has_next = False
 
     all_page_nums: set = set()
     target_candidates: set = set()
@@ -661,10 +663,17 @@ def _get_aspnet_pager_info(html: str) -> dict:
         href = a.get('href', '')
         if 'doPostBack' not in href:
             continue
+        # 數字頁碼：Page$2、Page$3 或直接 '2'
         m = re.search(r"__doPostBack\('([^']*)',\s*'(?:Page\$)?(\d+)'", href)
         if m:
             target_candidates.add(m.group(1))
             all_page_nums.add(int(m.group(2)))
+        # 文字頁碼：Page$Next / Page$Last（只知道有下一頁）
+        m2 = re.search(r"__doPostBack\('([^']*)',\s*'Page\$(Next|Last|Prev|First)'", href, re.IGNORECASE)
+        if m2:
+            target_candidates.add(m2.group(1))
+            if m2.group(2).lower() in ('next', 'last'):
+                has_next = True
 
     if target_candidates:
         event_target = sorted(target_candidates)[0]
@@ -678,6 +687,8 @@ def _get_aspnet_pager_info(html: str) -> dict:
 
     if all_page_nums:
         total_pages = max(all_page_nums)
+    elif has_next:
+        total_pages = 999  # 有下一頁但不知總數，由空結果判斷停止
 
     return {'current': current_page, 'total': total_pages, 'target': event_target}
 
@@ -690,7 +701,6 @@ async def _fetch_aspnet_page(client: 'httpx.AsyncClient', base_url: str, html: s
     hidden = _extract_aspnet_hidden_fields(html)
     hidden['__EVENTTARGET'] = event_target
     hidden['__EVENTARGUMENT'] = f'Page${page_num}'
-    hidden['__ASYNCPOST'] = 'true'
     try:
         r = await client.post(
             base_url,
@@ -1137,6 +1147,9 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 if not page_html:
                     break
                 items = _parse_generic_list(page_html, url, strict_name_filter=strict_name_filter)
+                if not items:
+                    logger.info(f"ASP.NET page {page_num}: empty, stopping")
+                    break
                 if keyword:
                     kw = keyword.lower()
                     filtered = [i for i in items if kw in i['name'].lower()]
