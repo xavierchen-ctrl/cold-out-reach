@@ -693,6 +693,79 @@ def _get_aspnet_pager_info(html: str) -> dict:
     return {'current': current_page, 'total': total_pages, 'target': event_target}
 
 
+async def _scrape_aspnet_pages_playwright(
+    url: str, lim: int, strict_name_filter: bool, keyword: Optional[str] = None
+) -> List[dict]:
+    """
+    Playwright 方式翻閱 ASP.NET __doPostBack 分頁。
+    載入第一頁後反覆點擊「下一頁」按鈕，回傳第 2 頁起的所有結果。
+    """
+    all_items: List[dict] = []
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=['--no-sandbox', '--disable-setuid-sandbox',
+                      '--disable-dev-shm-usage', '--disable-gpu', '--ignore-certificate-errors']
+            )
+            ctx = await browser.new_context(
+                user_agent=HEADERS['User-Agent'],
+                locale='zh-TW',
+                viewport={'width': 1280, 'height': 800},
+                ignore_https_errors=True,
+            )
+            page = await ctx.new_page()
+            await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            await page.wait_for_timeout(1000)
+
+            page_count = 1
+            next_selectors = [
+                'a[href*="Page$Next"]',
+                'a:text-is("下一頁")',
+                'a:text-is("Next")',
+                'a:text-is(">")',
+                'a:text-is("»")',
+            ]
+
+            while len(all_items) < lim and page_count < 50:
+                # 點擊「下一頁」
+                clicked = False
+                for sel in next_selectors:
+                    try:
+                        loc = page.locator(sel).first
+                        if await loc.count() > 0 and await loc.is_visible(timeout=2000):
+                            await loc.click()
+                            await page.wait_for_load_state('domcontentloaded')
+                            await page.wait_for_timeout(800)
+                            clicked = True
+                            page_count += 1
+                            break
+                    except Exception:
+                        pass
+
+                if not clicked:
+                    logger.info(f"Playwright ASP.NET: 找不到下一頁按鈕，停在第 {page_count} 頁")
+                    break
+
+                html = await page.content()
+                items = _parse_generic_list(html, url, strict_name_filter=strict_name_filter)
+                if not items:
+                    logger.info(f"Playwright ASP.NET page {page_count}: empty, stopping")
+                    break
+                if keyword:
+                    kw = keyword.lower()
+                    filtered = [i for i in items if kw in i['name'].lower()]
+                    items = filtered if filtered else items
+                all_items.extend(items)
+                logger.info(f"Playwright ASP.NET page {page_count}: {len(items)} items, total {len(all_items)}")
+
+            await browser.close()
+    except Exception as e:
+        logger.warning(f"Playwright ASP.NET pagination error: {e}")
+    return all_items
+
+
 async def _fetch_aspnet_page(client: 'httpx.AsyncClient', base_url: str, html: str,
                               page_num: int, event_target: str) -> str:
     """
@@ -1134,30 +1207,45 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
             target = aspnet_config['target']
             total = aspnet_config['total']
             current_p = aspnet_config['current']
+            existing_names = {item['name'] for item in all_items}
 
-            for page_num in range(current_p + 1, total + 1):
-                if len(all_items) >= lim:
-                    break
-                await asyncio.sleep(0.8)
-                page_html = await _fetch_aspnet_page(client, url, first_html, page_num, target)
-                if not page_html:
-                    # POST 失敗，改用 Playwright 渲染
-                    logger.info(f"  ASP.NET POST failed, Playwright fallback page {page_num}")
-                    page_html = await _fetch_with_playwright(url)
-                if not page_html:
-                    break
-                items = _parse_generic_list(page_html, url, strict_name_filter=strict_name_filter)
-                if not items:
-                    logger.info(f"ASP.NET page {page_num}: empty, stopping")
-                    break
-                if keyword:
-                    kw = keyword.lower()
-                    filtered = [i for i in items if kw in i['name'].lower()]
-                    items = filtered if filtered else items
-                all_items.extend(items)
-                logger.info(f"ASP.NET page {page_num}: {len(items)} items, total {len(all_items)}")
-                # 更新 hidden fields（每頁的 __VIEWSTATE 會變）
-                first_html = page_html
+            # 先試 POST page 2，若有新資料就繼續 POST，否則換 Playwright
+            await asyncio.sleep(0.8)
+            test_html = await _fetch_aspnet_page(client, url, first_html, current_p + 1, target)
+            test_items = _parse_generic_list(test_html, url, strict_name_filter=strict_name_filter) if test_html else []
+            post_works = any(i['name'] not in existing_names for i in test_items)
+
+            if post_works:
+                logger.info("ASP.NET POST works, continuing with POST-based pagination")
+                # page 2 已確認有效，加入並繼續剩餘頁
+                all_items.extend(test_items)
+                first_html = test_html
+                for page_num in range(current_p + 2, total + 1):
+                    if len(all_items) >= lim:
+                        break
+                    await asyncio.sleep(0.8)
+                    page_html = await _fetch_aspnet_page(client, url, first_html, page_num, target)
+                    if not page_html:
+                        break
+                    items = _parse_generic_list(page_html, url, strict_name_filter=strict_name_filter)
+                    if not items:
+                        logger.info(f"ASP.NET POST page {page_num}: empty, stopping")
+                        break
+                    if keyword:
+                        kw = keyword.lower()
+                        filtered = [i for i in items if kw in i['name'].lower()]
+                        items = filtered if filtered else items
+                    all_items.extend(items)
+                    logger.info(f"ASP.NET POST page {page_num}: {len(items)} items, total {len(all_items)}")
+                    first_html = page_html
+            else:
+                logger.info("ASP.NET POST returned no new items, switching to Playwright pagination")
+                remaining = lim - len(all_items)
+                playwright_items = await _scrape_aspnet_pages_playwright(
+                    url, remaining, strict_name_filter, keyword
+                )
+                all_items.extend(playwright_items)
+                logger.info(f"Playwright ASP.NET done: +{len(playwright_items)} items")
 
         # 去重（以公司名稱為 key，後出現的補充缺少的欄位）
         seen = {}  # name -> item
