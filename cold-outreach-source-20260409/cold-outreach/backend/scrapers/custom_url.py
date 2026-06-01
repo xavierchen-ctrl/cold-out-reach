@@ -27,7 +27,7 @@ HEADERS = {
 BLACKLISTED_DOMAINS = {
     'facebook.com', 'fb.com', 'twitter.com', 'x.com', 'instagram.com',
     'youtube.com', 'linkedin.com', 'google.com', 'googleapis.com',
-    'line.me', 'tiktok.com', 'threads.net', 'threads.com',
+    'line.me', 'naver.jp', 'naver.com', 'tiktok.com', 'threads.net', 'threads.com',
     'shopee.tw', 'shopee.com', 'ruten.com.tw', 'pchome.com.tw',
     'yahoo.com', 'yahoo.com.tw', 'amazon.com', 'amazon.com.tw',
     'cloudfront.net', 'amazonaws.com', 'cdn.', 'cloudflare.com',
@@ -350,6 +350,9 @@ _NOISE_WORDS = {
     'main area', '+ more', 'skip to main content',
     'login', 'sign in', 'sign up', 'register', 'logout', 'sign out',
     'my account', 'member', 'membership',
+    # 展覽頁面通用標題/標籤
+    'exhibitor', 'exhibitors', 'exhibitor list', 'exhibitor search',
+    'booth', 'booths', 'pavilion', 'hall', 'zone',
     # 中文導覽
     '更多', '查看', '詳細', '點擊', '了解更多', '詳情',
     '首頁', '回首頁', '回上頁', '展區', '展館', '樓層',
@@ -388,6 +391,8 @@ _NOISE_PATTERNS = [
     re.compile(r'(列表|行事曆|免費服務|加值服務|攤位活動|觀展|資訊|說明|指南)$'),  # 展覽網站功能頁
     re.compile(r'^(參展|洽遊|觀展|展覽|展場|場地|交通|住宿|媒體|新聞)'),  # 展覽網站導覽開頭
     re.compile(r'^page\s*\d+$', re.IGNORECASE),   # 分頁連結 "page 2"、"page 3"
+    re.compile(r'\d+.*next', re.IGNORECASE),       # "1123...14Next »" 分頁文字
+    re.compile(r'^(next|prev|previous)\s*[»›>]?$', re.IGNORECASE),  # "Next »"、"Prev"
     re.compile(r'\b(terrace|pavilion|lounge|gallery|plaza|court)\s*$', re.IGNORECASE),  # 展覽區域名稱
     # 政府機關
     re.compile(r'管理局$'),                        # 科學園區管理局、工業區管理局
