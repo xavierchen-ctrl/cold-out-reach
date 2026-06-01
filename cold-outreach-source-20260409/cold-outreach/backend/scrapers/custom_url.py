@@ -647,10 +647,10 @@ def _extract_aspnet_hidden_fields(html: str) -> dict:
 def _get_aspnet_pager_info(html: str) -> dict:
     """
     從 ASP.NET 分頁取得：目前頁、總頁數、__EVENTTARGET。
+    直接 regex 搜全 HTML（含 onclick、href、script），不只看 a[href]。
     回傳 {'current': N, 'total': N, 'target': '...'}
     total=999 表示有下一頁但不知道總頁數（由呼叫端在空結果時停止）
     """
-    soup = BeautifulSoup(html, 'lxml')
     current_page = 1
     total_pages = 1
     event_target = ''
@@ -659,26 +659,21 @@ def _get_aspnet_pager_info(html: str) -> dict:
     all_page_nums: set = set()
     target_candidates: set = set()
 
-    for a in soup.select('a[href]'):
-        href = a.get('href', '')
-        if 'doPostBack' not in href:
-            continue
-        # 數字頁碼：Page$2、Page$3 或直接 '2'
-        m = re.search(r"__doPostBack\('([^']*)',\s*'(?:Page\$)?(\d+)'", href)
-        if m:
-            target_candidates.add(m.group(1))
-            all_page_nums.add(int(m.group(2)))
-        # 文字頁碼：Page$Next / Page$Last（只知道有下一頁）
-        m2 = re.search(r"__doPostBack\('([^']*)',\s*'Page\$(Next|Last|Prev|First)'", href, re.IGNORECASE)
-        if m2:
-            target_candidates.add(m2.group(1))
-            if m2.group(2).lower() in ('next', 'last'):
-                has_next = True
+    # 直接在原始 HTML 中搜尋所有 __doPostBack 呼叫（href、onclick、script 都涵蓋）
+    for m in re.finditer(r"__doPostBack\('([^']+)',\s*'(?:Page\$)?(\d+)'", html):
+        target_candidates.add(m.group(1))
+        all_page_nums.add(int(m.group(2)))
+
+    for m in re.finditer(r"__doPostBack\('([^']+)',\s*'Page\$(Next|Last|Prev|First)'", html, re.IGNORECASE):
+        target_candidates.add(m.group(1))
+        if m.group(2).lower() in ('next', 'last'):
+            has_next = True
 
     if target_candidates:
         event_target = sorted(target_candidates)[0]
 
     # 找 active/bold span（目前頁）
+    soup = BeautifulSoup(html, 'lxml')
     for span in soup.select('span[style*="font-weight"], span[style*="bold"], b, strong'):
         t = span.get_text(strip=True)
         if t.isdigit():
@@ -690,6 +685,7 @@ def _get_aspnet_pager_info(html: str) -> dict:
     elif has_next:
         total_pages = 999  # 有下一頁但不知總數，由空結果判斷停止
 
+    logger.info(f"ASP.NET pager: current={current_page}, total={total_pages}, target={event_target!r}, has_next={has_next}")
     return {'current': current_page, 'total': total_pages, 'target': event_target}
 
 
@@ -722,10 +718,12 @@ async def _scrape_aspnet_pages_playwright(
             page_count = 1
             next_selectors = [
                 'a[href*="Page$Next"]',
+                'a[onclick*="Page$Next"]',
                 'a:text-is("下一頁")',
                 'a:text-is("Next")',
                 'a:text-is(">")',
                 'a:text-is("»")',
+                'a:text-is("▶")',
             ]
 
             while len(all_items) < lim and page_count < 50:
@@ -781,7 +779,6 @@ async def _fetch_aspnet_page(client: 'httpx.AsyncClient', base_url: str, html: s
             headers={
                 **HEADERS,
                 'Content-Type': 'application/x-www-form-urlencoded',
-                'X-Requested-With': 'XMLHttpRequest',
                 'Referer': base_url,
             },
             timeout=20,
@@ -1126,13 +1123,18 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
             elif dopage_config or ajax_config:
                 current_url = None  # 由下面的迴圈處理
             else:
-                current_url = _get_next_page_generic(html, url)
-                # ASP.NET __doPostBack 分頁：標準 next link 找不到時偵測
-                if not current_url and '__doPostBack' in html and not aspnet_config:
+                # ASP.NET 優先偵測（直接在 HTML 搜尋 __doPostBack，不依賴 href）
+                if '__doPostBack' in html and not aspnet_config:
                     pager = _get_aspnet_pager_info(html)
                     if pager['total'] > 1 and pager['target']:
                         aspnet_config = {**pager, 'first_html': html}
-                        logger.info(f"  ASP.NET pagination: {pager['total']} pages, target={pager['target']}")
+                        logger.info(f"ASP.NET pagination detected: {pager['total']} pages, target={pager['target']!r}")
+                        current_url = None  # 交給下面的 ASP.NET 迴圈
+                    else:
+                        current_url = _get_next_page_generic(html, url)
+                        logger.info(f"__doPostBack in HTML but pager invalid (total={pager['total']}, target={pager['target']!r}), fallback to generic next")
+                else:
+                    current_url = _get_next_page_generic(html, url)
             current_page += 1
             if current_page > 100:  # 安全上限
                 break
