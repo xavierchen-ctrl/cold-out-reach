@@ -626,53 +626,88 @@ def _get_next_page_generic(html: str, base_url: str) -> Optional[str]:
     return None
 
 
-def _detect_aspnet_next_page(html: str, base_url: str, current_page: int) -> Optional[str]:
-    """
-    ASP.NET __doPostBack 分頁：從 pager 的 doPostBack href 找下一頁，
-    轉換成 ?page=N 的 GET 請求（多數 ASP.NET 展覽站同時支援兩種方式）。
-    """
-    if '__doPostBack' not in html:
-        return None
-    soup = BeautifulSoup(html, 'lxml')
+def _extract_aspnet_hidden_fields(html: str) -> dict:
+    """提取 ASP.NET 表單的 hidden fields（__VIEWSTATE 等）"""
+    fields = {}
+    for m in re.finditer(
+        r'<input[^>]+type=["\']hidden["\'][^>]+name=["\']([^"\']+)["\'][^>]+value=["\']([^"\']*)["\']',
+        html, re.IGNORECASE
+    ):
+        fields[m.group(1)] = m.group(2)
+    # 也處理 value 在 name 前面的情況
+    for m in re.finditer(
+        r'<input[^>]+type=["\']hidden["\'][^>]+value=["\']([^"\']*)["\'][^>]+name=["\']([^"\']+)["\']',
+        html, re.IGNORECASE
+    ):
+        if m.group(2) not in fields:
+            fields[m.group(2)] = m.group(1)
+    return fields
 
-    # 從 doPostBack 的 href 收集所有頁碼
-    all_pages: set = set()
+
+def _get_aspnet_pager_info(html: str) -> dict:
+    """
+    從 ASP.NET 分頁取得：目前頁、總頁數、__EVENTTARGET。
+    回傳 {'current': N, 'total': N, 'target': '...'}
+    """
+    soup = BeautifulSoup(html, 'lxml')
+    current_page = 1
+    total_pages = 1
+    event_target = ''
+
+    all_page_nums: set = set()
+    target_candidates: set = set()
+
     for a in soup.select('a[href]'):
         href = a.get('href', '')
         if 'doPostBack' not in href:
             continue
-        # Page$N 格式
-        m = re.search(r'Page\$(\d+)', href, re.IGNORECASE)
+        m = re.search(r"__doPostBack\('([^']*)',\s*'(?:Page\$)?(\d+)'", href)
         if m:
-            all_pages.add(int(m.group(1)))
-            continue
-        # 純數字文字的分頁連結
-        text = a.get_text(strip=True)
-        if text.isdigit():
-            all_pages.add(int(text))
+            target_candidates.add(m.group(1))
+            all_page_nums.add(int(m.group(2)))
 
-    # 找目前 active 頁碼（更準確地定位 current_page）
-    for el in soup.select('.active, .current, [class*="active"], [class*="current"]'):
-        t = el.get_text(strip=True)
+    if target_candidates:
+        event_target = sorted(target_candidates)[0]
+
+    # 找 active/bold span（目前頁）
+    for span in soup.select('span[style*="font-weight"], span[style*="bold"], b, strong'):
+        t = span.get_text(strip=True)
         if t.isdigit():
-            current_page = max(current_page, int(t))
+            current_page = int(t)
             break
 
-    next_pages = sorted(p for p in all_pages if p > current_page)
-    if not next_pages:
-        return None
+    if all_page_nums:
+        total_pages = max(all_page_nums)
 
-    next_num = next_pages[0]
-    parsed = urllib.parse.urlparse(base_url)
-    params = dict(urllib.parse.parse_qsl(parsed.query))
+    return {'current': current_page, 'total': total_pages, 'target': event_target}
 
-    # 若 URL 已有頁碼參數，直接替換；否則加上 page=N
-    for param in ('page', 'Page', 'PageIndex', 'pageIndex', 'PageNo', 'pageNo', 'p'):
-        if param in params:
-            params[param] = str(next_num)
-            return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(params)))
-    params['page'] = str(next_num)
-    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(params)))
+
+async def _fetch_aspnet_page(client: 'httpx.AsyncClient', base_url: str, html: str,
+                              page_num: int, event_target: str) -> str:
+    """
+    模擬 ASP.NET __doPostBack POST 請求抓指定頁。
+    """
+    hidden = _extract_aspnet_hidden_fields(html)
+    hidden['__EVENTTARGET'] = event_target
+    hidden['__EVENTARGUMENT'] = f'Page${page_num}'
+    hidden['__ASYNCPOST'] = 'true'
+    try:
+        r = await client.post(
+            base_url,
+            data=hidden,
+            headers={
+                **HEADERS,
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Referer': base_url,
+            },
+            timeout=20,
+        )
+        r.raise_for_status()
+        return r.text
+    except Exception as e:
+        logger.warning(f"ASP.NET POST page {page_num} error: {e}")
+        return ''
 
 
 def _detect_dopage_pagination(html: str, base_url: str) -> Optional[dict]:
@@ -941,11 +976,11 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
         # ── 第一層：爬所有列表頁 ──────────────────────────────────────────────
         ajax_config = None
         dopage_config = None
+        aspnet_config = None   # ASP.NET __doPostBack 分頁設定
         chanchao_new_total_pages = 1  # 在迴圈外宣告，才能跨頁保持
 
         while current_url and current_url not in visited and len(all_items) < lim:
             visited.add(current_url)
-            page_url_for_next = current_url  # 記錄本頁 URL，供翻頁偵測用
             html = ''
             try:
                 await asyncio.sleep(0.8)
@@ -1009,11 +1044,12 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 current_url = None  # 由下面的迴圈處理
             else:
                 current_url = _get_next_page_generic(html, url)
-                # ASP.NET __doPostBack 分頁：標準 next link 找不到時嘗試
-                if not current_url:
-                    current_url = _detect_aspnet_next_page(html, page_url_for_next, current_page)
-                    if current_url:
-                        logger.info(f"  ASP.NET pagination → {current_url}")
+                # ASP.NET __doPostBack 分頁：標準 next link 找不到時偵測
+                if not current_url and '__doPostBack' in html and not aspnet_config:
+                    pager = _get_aspnet_pager_info(html)
+                    if pager['total'] > 1 and pager['target']:
+                        aspnet_config = {**pager, 'first_html': html}
+                        logger.info(f"  ASP.NET pagination: {pager['total']} pages, target={pager['target']}")
             current_page += 1
             if current_page > 100:  # 安全上限
                 break
@@ -1081,6 +1117,34 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 except Exception as e:
                     logger.warning(f"AJAX page {ajax_page} error: {e}")
                     break
+
+        # ── ASP.NET __doPostBack 分頁（如 computex.biz）────────────────────────
+        if aspnet_config and len(all_items) < lim:
+            first_html = aspnet_config['first_html']
+            target = aspnet_config['target']
+            total = aspnet_config['total']
+            current_p = aspnet_config['current']
+
+            for page_num in range(current_p + 1, total + 1):
+                if len(all_items) >= lim:
+                    break
+                await asyncio.sleep(0.8)
+                page_html = await _fetch_aspnet_page(client, url, first_html, page_num, target)
+                if not page_html:
+                    # POST 失敗，改用 Playwright 渲染
+                    logger.info(f"  ASP.NET POST failed, Playwright fallback page {page_num}")
+                    page_html = await _fetch_with_playwright(url)
+                if not page_html:
+                    break
+                items = _parse_generic_list(page_html, url, strict_name_filter=strict_name_filter)
+                if keyword:
+                    kw = keyword.lower()
+                    filtered = [i for i in items if kw in i['name'].lower()]
+                    items = filtered if filtered else items
+                all_items.extend(items)
+                logger.info(f"ASP.NET page {page_num}: {len(items)} items, total {len(all_items)}")
+                # 更新 hidden fields（每頁的 __VIEWSTATE 會變）
+                first_html = page_html
 
         # 去重（以公司名稱為 key，後出現的補充缺少的欄位）
         seen = {}  # name -> item
