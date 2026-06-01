@@ -621,6 +621,55 @@ def _get_next_page_generic(html: str, base_url: str) -> Optional[str]:
     return None
 
 
+def _detect_aspnet_next_page(html: str, base_url: str, current_page: int) -> Optional[str]:
+    """
+    ASP.NET __doPostBack 分頁：從 pager 的 doPostBack href 找下一頁，
+    轉換成 ?page=N 的 GET 請求（多數 ASP.NET 展覽站同時支援兩種方式）。
+    """
+    if '__doPostBack' not in html:
+        return None
+    soup = BeautifulSoup(html, 'lxml')
+
+    # 從 doPostBack 的 href 收集所有頁碼
+    all_pages: set = set()
+    for a in soup.select('a[href]'):
+        href = a.get('href', '')
+        if 'doPostBack' not in href:
+            continue
+        # Page$N 格式
+        m = re.search(r'Page\$(\d+)', href, re.IGNORECASE)
+        if m:
+            all_pages.add(int(m.group(1)))
+            continue
+        # 純數字文字的分頁連結
+        text = a.get_text(strip=True)
+        if text.isdigit():
+            all_pages.add(int(text))
+
+    # 找目前 active 頁碼（更準確地定位 current_page）
+    for el in soup.select('.active, .current, [class*="active"], [class*="current"]'):
+        t = el.get_text(strip=True)
+        if t.isdigit():
+            current_page = max(current_page, int(t))
+            break
+
+    next_pages = sorted(p for p in all_pages if p > current_page)
+    if not next_pages:
+        return None
+
+    next_num = next_pages[0]
+    parsed = urllib.parse.urlparse(base_url)
+    params = dict(urllib.parse.parse_qsl(parsed.query))
+
+    # 若 URL 已有頁碼參數，直接替換；否則加上 page=N
+    for param in ('page', 'Page', 'PageIndex', 'pageIndex', 'PageNo', 'pageNo', 'p'):
+        if param in params:
+            params[param] = str(next_num)
+            return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(params)))
+    params['page'] = str(next_num)
+    return urllib.parse.urlunparse(parsed._replace(query=urllib.parse.urlencode(params)))
+
+
 def _detect_dopage_pagination(html: str, base_url: str) -> Optional[dict]:
     """
     偵測 doPage(N) 型 JavaScript 分頁（如 taiwanhoreca.com.tw）。
@@ -891,6 +940,8 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
         while current_url and current_url not in visited and len(all_items) < lim:
             visited.add(current_url)
+            page_url_for_next = current_url  # 記錄本頁 URL，供翻頁偵測用
+            html = ''
             try:
                 await asyncio.sleep(0.8)
                 resp = await client.get(current_url)
@@ -906,6 +957,19 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 items = _parse_chanchao_old_list(html, url)
             else:
                 items = _parse_generic_list(html, url, strict_name_filter=strict_name_filter)
+
+            # Playwright fallback：httpx 拿到 0 筆 且頁面可能需要 JS 渲染
+            if not items and _needs_playwright(html):
+                logger.info(f"  List Playwright fallback: {current_url}")
+                pw_html = await _fetch_with_playwright(current_url)
+                if pw_html:
+                    html = pw_html
+                    if is_chanchao_new:
+                        items = _parse_chanchao_new_list(html, url)
+                    elif is_chanchao_old:
+                        items = _parse_chanchao_old_list(html, url)
+                    else:
+                        items = _parse_generic_list(html, url, strict_name_filter=strict_name_filter)
 
             # keyword 篩選
             if keyword:
@@ -940,6 +1004,11 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 current_url = None  # 由下面的迴圈處理
             else:
                 current_url = _get_next_page_generic(html, url)
+                # ASP.NET __doPostBack 分頁：標準 next link 找不到時嘗試
+                if not current_url:
+                    current_url = _detect_aspnet_next_page(html, page_url_for_next, current_page)
+                    if current_url:
+                        logger.info(f"  ASP.NET pagination → {current_url}")
             current_page += 1
             if current_page > 100:  # 安全上限
                 break
@@ -1043,12 +1112,25 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     await asyncio.sleep(0.5)
                     r = await client.get(item['detail_url'])
                     r.raise_for_status()
+                    detail_html = r.text
                     if is_chanchao_new:
-                        detail = _parse_chanchao_detail(r.text, url, is_new=True)
+                        detail = _parse_chanchao_detail(detail_html, url, is_new=True)
                     elif is_chanchao_old:
-                        detail = _parse_chanchao_detail(r.text, url, is_new=False)
+                        detail = _parse_chanchao_detail(detail_html, url, is_new=False)
                     else:
-                        detail = _parse_generic_detail(r.text, url)
+                        detail = _parse_generic_detail(detail_html, url)
+                    # Playwright fallback：詳情頁抓不到官網且頁面可能需要 JS
+                    if not detail.get('website') and _needs_playwright(detail_html):
+                        logger.info(f"  Detail Playwright fallback: {item['detail_url']}")
+                        pw_html = await _fetch_with_playwright(item['detail_url'])
+                        if pw_html:
+                            detail2 = _parse_generic_detail(pw_html, url)
+                            if not detail.get('website'):
+                                detail['website'] = detail2.get('website')
+                            if not detail.get('phone'):
+                                detail['phone'] = detail2.get('phone')
+                            if not detail.get('email'):
+                                detail['email'] = detail2.get('email')
                     visited.add(item['detail_url'])
                     if not phone:
                         phone = detail.get('phone')
