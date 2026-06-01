@@ -1167,7 +1167,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
         # ── 第二層：詳情頁（只有缺資料時才進）──────────────────────────────────
         results = []
-        website_scrape_count = 0  # 第三層最多補 100 家
+        website_scrape_count = 0  # 第三層最多補 30 家（避免卡住）
         for item in unique_items:
             phone   = item.get('phone')
             email   = item.get('email')
@@ -1179,7 +1179,10 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
             if need_detail and item['detail_url'] not in visited:
                 try:
                     await asyncio.sleep(0.5)
-                    r = await client.get(item['detail_url'])
+                    r = await asyncio.wait_for(
+                        client.get(item['detail_url']),
+                        timeout=15,
+                    )
                     r.raise_for_status()
                     detail_html = r.text
                     if is_chanchao_new:
@@ -1191,7 +1194,10 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     # Playwright fallback：詳情頁抓不到官網且頁面可能需要 JS
                     if not detail.get('website') and _needs_playwright(detail_html):
                         logger.info(f"  Detail Playwright fallback: {item['detail_url']}")
-                        pw_html = await _fetch_with_playwright(item['detail_url'])
+                        pw_html = await asyncio.wait_for(
+                            _fetch_with_playwright(item['detail_url']),
+                            timeout=20,
+                        )
                         if pw_html:
                             detail2 = _parse_generic_detail(pw_html, url)
                             if not detail.get('website'):
@@ -1207,17 +1213,25 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         email = detail.get('email')
                     if not website:
                         website = detail.get('website')
+                except asyncio.TimeoutError:
+                    logger.warning(f"Detail page timeout: {item['detail_url']}")
                 except Exception as e:
                     logger.warning(f"Detail page error {item['detail_url']}: {e}")
 
             # ── 第三層：官網（有官網但還缺電話/Email，且未超過上限）──────────────
-            if website and (not phone or not email) and website_scrape_count < 100:
+            if website and (not phone or not email) and website_scrape_count < 30:
                 website_scrape_count += 1
-                phone_w, email_w = await _scrape_company_website(client, website)
-                if phone_w and not phone:
-                    phone = phone_w
-                if email_w and not email:
-                    email = email_w
+                try:
+                    phone_w, email_w = await asyncio.wait_for(
+                        _scrape_company_website(client, website),
+                        timeout=25,
+                    )
+                    if phone_w and not phone:
+                        phone = phone_w
+                    if email_w and not email:
+                        email = email_w
+                except asyncio.TimeoutError:
+                    logger.warning(f"Website scrape timeout: {website}")
 
             # 新版展昭：公司名稱補充
             company_name = item['name']
