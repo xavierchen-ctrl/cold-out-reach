@@ -1,4 +1,5 @@
 import os
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,11 @@ from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(levelname)s [%(name)s] %(message)s",
+)
 
 from database import engine, Base
 import models  # register all ORM models
