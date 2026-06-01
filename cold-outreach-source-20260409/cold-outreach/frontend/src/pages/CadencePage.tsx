@@ -398,12 +398,12 @@ export default function CadencePage() {
                       {step.type === 'email' && (
                         <div className="col-span-4">
                           <Label className="text-xs">模板（選填）</Label>
-                          <Select value={step.template_id || ''} onValueChange={v => updateStep(i, { template_id: v || null })}>
+                          <Select value={step.template_id || '__none__'} onValueChange={v => updateStep(i, { template_id: v === '__none__' ? null : v })}>
                             <SelectTrigger className="h-8 text-sm mt-0.5">
                               <SelectValue placeholder="不選模板" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="">不選模板</SelectItem>
+                              <SelectItem value="__none__">不選模板</SelectItem>
                               {templates.map(t => (
                                 <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>
                               ))}
