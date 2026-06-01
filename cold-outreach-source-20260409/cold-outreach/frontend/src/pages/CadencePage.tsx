@@ -349,7 +349,7 @@ export default function CadencePage() {
 
       {/* Create Cadence Modal */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        {showCreate && <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>建立 Cadence</DialogTitle></DialogHeader>
           <div className="space-y-4">
             <div>
@@ -438,12 +438,12 @@ export default function CadencePage() {
               </Button>
             </div>
           </div>
-        </DialogContent>
+        </DialogContent>}
       </Dialog>
 
       {/* Enroll Leads Modal */}
       <Dialog open={showEnroll} onOpenChange={setShowEnroll}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        {showEnroll && <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
           <DialogHeader><DialogTitle>加入名單到 {selected?.name}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">已選擇 {selectedLeads.length} 筆名單</p>
@@ -473,7 +473,7 @@ export default function CadencePage() {
               </Button>
             </div>
           </div>
-        </DialogContent>
+        </DialogContent>}
       </Dialog>
     </div>
   )
