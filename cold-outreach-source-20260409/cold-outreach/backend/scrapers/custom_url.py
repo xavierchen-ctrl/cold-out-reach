@@ -1379,6 +1379,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                             if not detail.get('email'):
                                 detail['email'] = detail2.get('email')
                     visited.add(item['detail_url'])
+                    logger.info(f"  Detail result: phone={detail.get('phone')!r} email={detail.get('email')!r} web={detail.get('website')!r}")
                     if not phone:
                         phone = detail.get('phone')
                     if not email:
@@ -1393,11 +1394,13 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
             # ── 第三層：官網（有官網但還缺電話/Email，且未超過上限）──────────────
             if website and (not phone or not email) and website_scrape_count < 30:
                 website_scrape_count += 1
+                logger.info(f"  Website scrape: {website}")
                 try:
                     phone_w, email_w = await asyncio.wait_for(
                         _scrape_company_website(client, website),
                         timeout=25,
                     )
+                    logger.info(f"  Website result: phone={phone_w!r} email={email_w!r}")
                     if phone_w and not phone:
                         phone = phone_w
                     if email_w and not email:
