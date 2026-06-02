@@ -931,34 +931,33 @@ def _needs_playwright(html: str) -> bool:
     return False
 
 
+_PW_LAUNCH_ARGS = [
+    '--no-sandbox', '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage', '--disable-gpu', '--ignore-certificate-errors',
+]
+_PW_CTX_OPTS = dict(
+    user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    locale='zh-TW',
+    viewport={'width': 1280, 'height': 800},
+    ignore_https_errors=True,
+    extra_http_headers={
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.7,en;q=0.6',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1', 'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document', 'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none', 'Sec-Fetch-User': '?1',
+    },
+)
+
+
 async def _fetch_with_playwright(url: str, wait_for: str = 'networkidle') -> str:
     """用 Playwright Chromium 取得完整渲染後的 HTML"""
     try:
         from playwright.async_api import async_playwright
         async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=['--no-sandbox', '--disable-setuid-sandbox',
-                      '--disable-dev-shm-usage', '--disable-gpu',
-                      '--ignore-certificate-errors']
-            )
-            ctx = await browser.new_context(
-                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                locale='zh-TW',
-                viewport={'width': 1280, 'height': 800},
-                ignore_https_errors=True,
-                extra_http_headers={
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                    'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.7,en;q=0.6',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'DNT': '1',
-                    'Upgrade-Insecure-Requests': '1',
-                    'Sec-Fetch-Dest': 'document',
-                    'Sec-Fetch-Mode': 'navigate',
-                    'Sec-Fetch-Site': 'none',
-                    'Sec-Fetch-User': '?1',
-                },
-            )
+            browser = await p.chromium.launch(headless=True, args=_PW_LAUNCH_ARGS)
+            ctx = await browser.new_context(**_PW_CTX_OPTS)
             page = await ctx.new_page()
             await page.goto(url, wait_until=wait_for, timeout=8000)
             await page.wait_for_timeout(800)
@@ -968,6 +967,33 @@ async def _fetch_with_playwright(url: str, wait_for: str = 'networkidle') -> str
     except Exception as e:
         logger.warning(f"Playwright fetch error ({url}): {e}")
         return ''
+
+
+async def _batch_fetch_with_playwright(urls: list, wait_ms: int = 1500, page_timeout: int = 12000) -> dict:
+    """一次啟動一個瀏覽器，依序抓多個 URL，回傳 {url: html}。
+    比逐個啟動瀏覽器快很多（省去重複的啟動開銷）。
+    """
+    results = {}
+    if not urls:
+        return results
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=_PW_LAUNCH_ARGS)
+            ctx = await browser.new_context(**_PW_CTX_OPTS)
+            page = await ctx.new_page()
+            for url in urls:
+                try:
+                    await page.goto(url, wait_until='domcontentloaded', timeout=page_timeout)
+                    await page.wait_for_timeout(wait_ms)
+                    results[url] = await page.content()
+                except Exception as e:
+                    logger.debug(f"Batch Playwright skip {url}: {e}")
+                    results[url] = ''
+            await browser.close()
+    except Exception as e:
+        logger.warning(f"Batch Playwright error: {e}")
+    return results
 
 
 # ── 第三層：進官網抓電話/Email ────────────────────────────────────────────────
@@ -1337,9 +1363,25 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
         logger.info(f"Total unique: {len(unique_items)} companies")
 
+        # ── Batch Playwright：一次啟動一個瀏覽器抓所有需要 JS 的詳情頁 ──────────
+        # 針對 computex.biz 等 AJAX 載入聯絡資訊的展覽網站
+        _batch_pw_html: dict = {}
+        _needs_batch_pw = any('computex.biz' in (item.get('detail_url') or '') for item in unique_items)
+        if _needs_batch_pw:
+            _batch_urls = [
+                item['detail_url'] for item in unique_items
+                if item.get('detail_url') and 'computex.biz' in item['detail_url']
+            ]
+            logger.info(f"Batch Playwright: {len(_batch_urls)} Computex detail pages")
+            _batch_pw_html = await asyncio.wait_for(
+                _batch_fetch_with_playwright(_batch_urls, wait_ms=1500, page_timeout=12000),
+                timeout=len(_batch_urls) * 15 + 30,
+            )
+            logger.info(f"Batch Playwright done: {sum(1 for v in _batch_pw_html.values() if v)} pages OK")
+
         # ── 第二層：詳情頁（只有缺資料時才進）──────────────────────────────────
         results = []
-        website_scrape_count = 0  # 第三層最多補 30 家（避免卡住）
+        website_scrape_count = 0
         for item in unique_items:
             phone   = item.get('phone')
             email   = item.get('email')
@@ -1363,11 +1405,19 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         detail = _parse_chanchao_detail(detail_html, url, is_new=False)
                     else:
                         detail = _parse_generic_detail(detail_html, url)
-                    # Playwright fallback：詳情頁缺少關鍵欄位且頁面可能需要 JS
-                    # computex.biz 的聯絡資訊為 AJAX 載入，一律用 Playwright 補充
+                    # Playwright fallback：詳情頁缺少關鍵欄位
+                    # computex.biz 使用 batch Playwright 預先抓好，直接用；其他頁面按 _needs_playwright 判斷
                     _detail_url = item.get('detail_url', '')
-                    _force_pw = 'computex.biz' in _detail_url and (not detail.get('phone') or not detail.get('email'))
-                    if (not detail.get('website') or not detail.get('phone') or not detail.get('email')) and (_needs_playwright(detail_html) or _force_pw):
+                    _batch_html = _batch_pw_html.get(_detail_url, '')
+                    if _batch_html and (not detail.get('phone') or not detail.get('email')):
+                        detail2 = _parse_generic_detail(_batch_html, url)
+                        if not detail.get('website'):
+                            detail['website'] = detail2.get('website')
+                        if not detail.get('phone'):
+                            detail['phone'] = detail2.get('phone')
+                        if not detail.get('email'):
+                            detail['email'] = detail2.get('email')
+                    if (not detail.get('website') or not detail.get('phone') or not detail.get('email')) and _needs_playwright(detail_html):
                         logger.info(f"  Detail Playwright fallback: {item['detail_url']}")
                         pw_html = await asyncio.wait_for(
                             _fetch_with_playwright(item['detail_url']),
