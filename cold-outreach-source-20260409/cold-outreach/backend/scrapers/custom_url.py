@@ -1098,6 +1098,13 @@ async def _scrape_company_website(client: httpx.AsyncClient, website: str) -> Tu
         except Exception:
             pass
 
+    # 3. 最終保底：靜態抓完都沒有 → 用 Playwright 重抓首頁（JS 渲染的聯絡資訊）
+    if (not phone or not email) and homepage_html and len(homepage_html) > 3000:
+        logger.info(f"  Playwright last-resort: {website}")
+        pw_html = await _fetch_with_playwright(website, wait_for='domcontentloaded')
+        if pw_html:
+            await _extract_from_html(pw_html)
+
     return phone, email
 
 
