@@ -1525,9 +1525,13 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         _e = _te
                     # Fallback: search raw HTML directly for email patterns
                     # Catches emails in data-attributes, JS strings, or markup not captured by get_text()
+                    _ASSET_EXTS = ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+                                   '.bmp', '.css', '.js', '.html', '.htm', '.pdf', '.zip', '.xml')
                     if not _e:
                         for _raw_e in re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', pw_html):
                             _re_lower = _raw_e.lower()
+                            if any(_re_lower.endswith(ext) for ext in _ASSET_EXTS):
+                                continue
                             if not any(_re_lower.startswith(pfx) for pfx in SYSTEM_EMAIL_PREFIXES):
                                 _e = _raw_e
                                 break
