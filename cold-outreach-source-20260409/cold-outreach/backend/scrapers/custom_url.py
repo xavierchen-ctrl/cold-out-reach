@@ -1382,6 +1382,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
         # ── 第二層：詳情頁（只有缺資料時才進）──────────────────────────────────
         results = []
         website_scrape_count = 0
+        _website_pw_needed: list = []  # [(result_index, website_url)] 需要 Playwright 補抓的官網
         for item in unique_items:
             phone   = item.get('phone')
             email   = item.get('email')
@@ -1461,6 +1462,10 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 except asyncio.TimeoutError:
                     logger.warning(f"Website scrape timeout: {website}")
 
+            # 靜態抓完仍缺資料 → 記下來，等批次 Playwright 補
+            if website and (not phone or not email):
+                _website_pw_needed.append((len(results), website))
+
             # 新版展昭：公司名稱補充
             company_name = item['name']
             if company_name.startswith('__pending__') and detail.get('company_name'):
@@ -1482,6 +1487,45 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 'source_url': url,
                 'notes': None,
             })
+
+        # ── Batch Playwright 補抓官網（靜態抓不到聯絡資訊的公司）────────────────
+        MAX_WEBSITE_PW = 20  # 最多補 20 家，避免超時
+        if _website_pw_needed:
+            _wpw_slice = _website_pw_needed[:MAX_WEBSITE_PW]
+            _wpw_urls = [w for _, w in _wpw_slice]
+            logger.info(f"Batch Playwright websites: {len(_wpw_urls)} companies still missing data")
+            try:
+                _wpw_html = await asyncio.wait_for(
+                    _batch_fetch_with_playwright(_wpw_urls, wait_ms=800, page_timeout=8000),
+                    timeout=min(len(_wpw_urls) * 10 + 20, 240),
+                )
+                for idx, website_url in _wpw_slice:
+                    pw_html = _wpw_html.get(website_url, '')
+                    if not pw_html:
+                        continue
+                    from bs4 import BeautifulSoup as _BS
+                    _soup = _BS(pw_html, 'lxml')
+                    for _t in _soup.select('script, style, nav, header'):
+                        _t.decompose()
+                    _text = _soup.get_text(separator=' ')
+                    _p, _e = extract_contact_info(_text, source_domain='')
+                    if not _p:
+                        _p, _ = extract_contact_info(_soup.get_text(separator=''), source_domain='')
+                    _tp, _te = _extract_tel_mailto(_soup, source_domain='')
+                    if not _p:
+                        _p = _tp
+                    if not _e:
+                        _e = _te
+                    if _p and not results[idx].get('phone'):
+                        results[idx]['phone'] = _p
+                        logger.info(f"  Website PW: {website_url} → phone={_p!r}")
+                    if _e and not results[idx].get('email'):
+                        results[idx]['email'] = _e
+                        logger.info(f"  Website PW: {website_url} → email={_e!r}")
+            except asyncio.TimeoutError:
+                logger.warning("Batch website Playwright timeout")
+            except Exception as e:
+                logger.warning(f"Batch website Playwright error: {e}")
 
     logger.info(f"Scrape done: {len(results)} results from {url}")
     return results
