@@ -172,15 +172,15 @@ def extract_contact_info(text: str, source_domain: str = '') -> Tuple[Optional[s
     phone = None
     email = None
 
-    # Email（不過濾公司 domain，只過濾系統信箱）
-    email_m = re.search(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text)
-    if email_m:
+    # Email：遍歷所有匹配，跳過系統信箱和來源展覽網站信箱，取第一個有效的
+    for email_m in re.finditer(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', text):
         e = email_m.group(0).lower()
         is_system = any(e.startswith(p) for p in SYSTEM_EMAIL_PREFIXES)
         # 如果是來源展覽網站的 email 才過濾（例如 CustomerService@chanchao.com.tw）
         is_source = source_domain and source_domain in e
         if not is_system and not is_source:
             email = email_m.group(0)
+            break
 
     # 電話（台灣各種格式）
     phone_patterns = [
@@ -1328,8 +1328,8 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         detail = _parse_chanchao_detail(detail_html, url, is_new=False)
                     else:
                         detail = _parse_generic_detail(detail_html, url)
-                    # Playwright fallback：詳情頁抓不到官網且頁面可能需要 JS
-                    if not detail.get('website') and _needs_playwright(detail_html):
+                    # Playwright fallback：詳情頁缺少關鍵欄位且頁面可能需要 JS
+                    if (not detail.get('website') or not detail.get('phone') or not detail.get('email')) and _needs_playwright(detail_html):
                         logger.info(f"  Detail Playwright fallback: {item['detail_url']}")
                         pw_html = await asyncio.wait_for(
                             _fetch_with_playwright(item['detail_url']),
