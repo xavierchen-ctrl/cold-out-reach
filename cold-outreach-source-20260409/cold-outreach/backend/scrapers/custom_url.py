@@ -1111,6 +1111,16 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         ajax_config = _detect_ajax_pagination(html, url)
                         if ajax_config:
                             logger.info(f"AJAX pagination detected: {ajax_config['url']}")
+                # 診斷：輸出頁面分頁特徵
+                has_dopostback = '__doPostBack' in html
+                has_dopage = bool(re.search(r'doPage\(', html))
+                next_link = _get_next_page_generic(html, url)
+                logger.info(
+                    f"Pagination probe: html_len={len(html)}, "
+                    f"doPostBack={has_dopostback}, doPage={has_dopage}, "
+                    f"dopage_config={bool(dopage_config)}, ajax_config={bool(ajax_config)}, "
+                    f"generic_next={next_link!r}"
+                )
 
             # 找下一頁
             if is_chanchao_new and current_page < chanchao_new_total_pages:
