@@ -182,14 +182,16 @@ def extract_contact_info(text: str, source_domain: str = '') -> Tuple[Optional[s
             email = email_m.group(0)
             break
 
-    # 電話（台灣各種格式）
+    # 電話（台灣 + 國際格式）
     phone_patterns = [
-        r'\(?0[2-9]\d{0,2}\)?[-\s]?\d{3,4}[-\s]?\d{4}',       # (02)8979-6169、(07)-788-1114、02)8979-6169
-        r'0[2-9]\d{0,2}[-\s\.]\d{3,4}[-\s\.]\d{4}',          # 02-8979-6169 或 02.8979.6169
-        r'0[2-9]\d{0,2}[-\s\.]\d{6,8}',                       # 03-3792976 或 0800-007258（無中間分隔）
-        r'09\d{2}[-\s]?\d{3}[-\s]?\d{3}',                     # 0912-345-678
-        r'\+886[-\s]?[2-9]\d{0,1}[-\s]?\d{3,4}[-\s]?\d{4}',  # +886-2-1234-5678
-        r'\+886\d{8,9}',                                        # +886286675469（無分隔符國際格式）
+        r'\(?0[2-9]\d{0,2}\)?[-\s]?\d{3,4}[-\s]?\d{4}',       # (02)8979-6169
+        r'0[2-9]\d{0,2}[-\s\.]\d{3,4}[-\s\.]\d{4}',           # 02-8979-6169
+        r'0[2-9]\d{0,2}[-\s\.]\d{6,8}',                        # 03-3792976
+        r'09\d{2}[-\s]?\d{3}[-\s]?\d{3}',                      # 0912-345-678
+        r'\+886[-\s]?[2-9]\d{0,1}[-\s]?\d{3,4}[-\s]?\d{4}',   # +886-2-1234-5678
+        r'\+886\d{8,9}',                                         # +886286675469
+        r'\+1[-\s]?\(?\d{3}\)?[-\s]?\d{3}[-\s]?\d{4}',         # +1-800-123-4567 (北美)
+        r'\+(?:81|82|852|853|65|60|66|84|62|63|91|44|49|33|61|64)[-\s]?\d[\d\s\-\.]{6,14}\d',  # 亞太/歐洲
     ]
     for pattern in phone_patterns:
         m = re.search(pattern, text)
@@ -602,6 +604,11 @@ def _extract_tel_mailto(soup, source_domain: str = '') -> Tuple[Optional[str], O
     for a in soup.select('a[href^="tel:"], a[href^="TEL:"]'):
         raw = re.sub(r'^tel:', '', a.get('href', ''), flags=re.IGNORECASE).strip()
         p, _ = extract_contact_info(raw, source_domain)
+        if not p:
+            # tel: href 的數字通常是合法電話，直接用數字長度驗證（7-15 碼，ITU-T E.164）
+            digits = re.sub(r'\D', '', raw)
+            if 7 <= len(digits) <= 15:
+                p = raw
         if p:
             phone = p
             break
