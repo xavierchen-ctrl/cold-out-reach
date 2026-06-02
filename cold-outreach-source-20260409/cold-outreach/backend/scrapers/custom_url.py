@@ -1364,7 +1364,10 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     else:
                         detail = _parse_generic_detail(detail_html, url)
                     # Playwright fallback：詳情頁缺少關鍵欄位且頁面可能需要 JS
-                    if (not detail.get('website') or not detail.get('phone') or not detail.get('email')) and _needs_playwright(detail_html):
+                    # computex.biz 的聯絡資訊為 AJAX 載入，一律用 Playwright 補充
+                    _detail_url = item.get('detail_url', '')
+                    _force_pw = 'computex.biz' in _detail_url and (not detail.get('phone') or not detail.get('email'))
+                    if (not detail.get('website') or not detail.get('phone') or not detail.get('email')) and (_needs_playwright(detail_html) or _force_pw):
                         logger.info(f"  Detail Playwright fallback: {item['detail_url']}")
                         pw_html = await asyncio.wait_for(
                             _fetch_with_playwright(item['detail_url']),
@@ -1392,7 +1395,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     logger.warning(f"Detail page error {item['detail_url']}: {e}")
 
             # ── 第三層：官網（有官網但還缺電話/Email，且未超過上限）──────────────
-            if website and (not phone or not email) and website_scrape_count < 30:
+            if website and (not phone or not email) and website_scrape_count < lim:
                 website_scrape_count += 1
                 logger.info(f"  Website scrape: {website}")
                 try:
