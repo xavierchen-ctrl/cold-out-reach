@@ -596,6 +596,25 @@ def _parse_generic_list(html: str, base_url: str, strict_name_filter: bool = Tru
     return list(results.values())
 
 
+def _extract_tel_mailto(soup, source_domain: str = '') -> Tuple[Optional[str], Optional[str]]:
+    """從 tel:/mailto: href 屬性補充抓取電話和 Email"""
+    phone, email = None, None
+    for a in soup.select('a[href^="tel:"], a[href^="TEL:"]'):
+        raw = re.sub(r'^tel:', '', a.get('href', ''), flags=re.IGNORECASE).strip()
+        p, _ = extract_contact_info(raw, source_domain)
+        if p:
+            phone = p
+            break
+    for a in soup.select('a[href^="mailto:"], a[href^="MAILTO:"]'):
+        raw = re.sub(r'^mailto:', '', a.get('href', ''), flags=re.IGNORECASE).strip()
+        raw = raw.split('?')[0].strip()
+        _, e = extract_contact_info(raw, source_domain)
+        if e:
+            email = e
+            break
+    return phone, email
+
+
 def _parse_generic_detail(html: str, base_url: str) -> dict:
     """通用詳情頁：抓電話、Email、官網"""
     soup = BeautifulSoup(html, 'lxml')
@@ -606,6 +625,15 @@ def _parse_generic_detail(html: str, base_url: str) -> dict:
 
     text = soup.get_text(separator=' ')
     phone, email = extract_contact_info(text, source_domain)
+
+    # 補充：tel:/mailto: 連結（電話/Email 放在 href 而非文字內容）
+    if not phone or not email:
+        tp, te = _extract_tel_mailto(soup, source_domain)
+        if not phone:
+            phone = tp
+        if not email:
+            email = te
+
     website = _find_website_in_content(soup, source_domain)
 
     return {'phone': phone, 'email': email, 'website': website}
@@ -965,6 +993,13 @@ async def _scrape_company_website(client: httpx.AsyncClient, website: str) -> Tu
         if not p:
             compact = soup.get_text(separator='')
             p, _ = extract_contact_info(compact, source_domain='')
+        # 補充：tel:/mailto: 連結
+        if not p or not e:
+            tp, te = _extract_tel_mailto(soup, source_domain='')
+            if not p:
+                p = tp
+            if not e:
+                e = te
         if p and not phone:
             phone = p
         if e and not email:
