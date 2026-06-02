@@ -659,12 +659,16 @@ def _get_aspnet_pager_info(html: str) -> dict:
     all_page_nums: set = set()
     target_candidates: set = set()
 
+    # HTML entity 解碼（&quot; → "），讓 regex 能同時處理單引號和雙引號格式
+    html_decoded = html.replace('&quot;', '"').replace('&#39;', "'")
+
     # 直接在原始 HTML 中搜尋所有 __doPostBack 呼叫（href、onclick、script 都涵蓋）
-    for m in re.finditer(r"__doPostBack\('([^']+)',\s*'(?:Page\$)?(\d+)'", html):
+    # 同時支援單引號 '...' 和雙引號 "..." 格式
+    for m in re.finditer(r"""__doPostBack\(["']([^"']+)["'],\s*["'](?:Page\$)?(\d+)["']""", html_decoded):
         target_candidates.add(m.group(1))
         all_page_nums.add(int(m.group(2)))
 
-    for m in re.finditer(r"__doPostBack\('([^']+)',\s*'Page\$(Next|Last|Prev|First)'", html, re.IGNORECASE):
+    for m in re.finditer(r"""__doPostBack\(["']([^"']+)["'],\s*["']Page\$(Next|Last|Prev|First)["']""", html_decoded, re.IGNORECASE):
         target_candidates.add(m.group(1))
         if m.group(2).lower() in ('next', 'last'):
             has_next = True
@@ -716,14 +720,17 @@ async def _scrape_aspnet_pages_playwright(
             await page.wait_for_timeout(1000)
 
             page_count = 1
+            # :text() 做子字串比對（不用 :text-is() 精確比對），
+            # 以應付「Next »」「下一頁 >」等包含額外符號的按鈕文字
             next_selectors = [
                 'a[href*="Page$Next"]',
                 'a[onclick*="Page$Next"]',
-                'a:text-is("下一頁")',
-                'a:text-is("Next")',
-                'a:text-is(">")',
-                'a:text-is("»")',
-                'a:text-is("▶")',
+                'a:text("下一頁")',
+                'a:text("Next")',
+                'a:text("next")',
+                'a:text("»")',
+                'a:text(">")',
+                'a:text("▶")',
             ]
 
             while len(all_items) < lim and page_count < 50:
@@ -1057,6 +1064,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
         ajax_config = None
         dopage_config = None
         aspnet_config = None   # ASP.NET __doPostBack 分頁設定
+        first_page_html = ''   # 保留第一頁 HTML，供 Playwright fallback 判斷用
         chanchao_new_total_pages = 1  # 在迴圈外宣告，才能跨頁保持
 
         while current_url and current_url not in visited and len(all_items) < lim:
@@ -1070,6 +1078,9 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
             except Exception as e:
                 logger.warning(f"List page fetch error ({current_url}): {e}")
                 break
+
+            if current_page == 1:
+                first_page_html = html  # 供後續 Playwright fallback 判斷
 
             if is_chanchao_new:
                 items = _parse_chanchao_new_list(html, url)
@@ -1258,6 +1269,19 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 )
                 all_items.extend(playwright_items)
                 logger.info(f"Playwright ASP.NET done: +{len(playwright_items)} items")
+
+        # ── Playwright 翻頁 fallback（doPostBack 存在但 pager 偵測失敗的 JS 分頁網站）──
+        # 例如 computex.biz：__doPostBack 存在但用自訂 Repeater 控件，
+        # 第二參數非 Page$N，導致 _get_aspnet_pager_info 回傳 total=1, target=''
+        if (not aspnet_config and not dopage_config and not ajax_config
+                and first_page_html and '__doPostBack' in first_page_html
+                and len(all_items) < lim):
+            logger.info("doPostBack present but pager detection failed, using Playwright click-through")
+            remaining = lim - len(all_items)
+            pw_items = await _scrape_aspnet_pages_playwright(url, remaining, strict_name_filter, keyword)
+            if pw_items:
+                all_items.extend(pw_items)
+                logger.info(f"Playwright click-through fallback: +{len(pw_items)} items")
 
         # 去重（以公司名稱為 key，後出現的補充缺少的欄位）
         seen = {}  # name -> item
