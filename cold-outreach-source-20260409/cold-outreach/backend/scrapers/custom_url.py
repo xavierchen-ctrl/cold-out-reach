@@ -1523,6 +1523,10 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         _p = _tp
                     if not _e:
                         _e = _te
+                    # debug: 列出頁面中所有找到的 email（最多5個）方便排查
+                    _email_candidates = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', _text)
+                    if not _e and _email_candidates:
+                        logger.info(f"  Website PW debug {website_url}: email candidates={_email_candidates[:5]!r}, _te={_te!r}")
                     if _p and not results[idx].get('phone'):
                         results[idx]['phone'] = _p
                         logger.info(f"  Website PW: {website_url} → phone={_p!r}")
