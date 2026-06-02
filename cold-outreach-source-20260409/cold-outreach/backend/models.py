@@ -460,3 +460,30 @@ class CallLog(Base):
 
     lead = relationship("Lead", foreign_keys=[lead_id])
     caller = relationship("User", foreign_keys=[caller_id])
+
+
+# ── 提案管理 ───────────────────────────────────────────────────────────────────
+
+class ProposalStatus(str, enum.Enum):
+    draft = "draft"
+    sent = "sent"
+
+
+class Proposal(Base):
+    __tablename__ = "proposals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(500), nullable=False)
+    product_focus = Column(String(255), nullable=True)   # 主推服務
+    budget_range = Column(String(100), nullable=True)    # 預算區間
+    status = Column(SAEnum(ProposalStatus), nullable=False, default=ProposalStatus.draft)
+    content = Column(JSON, nullable=True)                # 5-phase structured content
+    email_subject = Column(String(500), nullable=True)   # 配套開發信主旨
+    email_body = Column(Text, nullable=True)             # 配套開發信內文
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime, default=now_tw)
+    updated_at = Column(DateTime, default=now_tw, onupdate=now_tw)
+
+    lead = relationship("Lead", foreign_keys=[lead_id])
+    creator = relationship("User", foreign_keys=[created_by])

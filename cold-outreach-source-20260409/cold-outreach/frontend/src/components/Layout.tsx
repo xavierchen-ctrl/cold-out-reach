@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
-import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X, Presentation } from 'lucide-react'
 
 export default function Layout() {
   const { user, signOut } = useAuth()
@@ -26,6 +26,7 @@ export default function Layout() {
           { to: '/templates', icon: <FileText className="w-4 h-4" />, label: '信件模板' },
           { to: '/today', icon: <CalendarCheck className="w-4 h-4" />, label: '今日待辦' },
           { to: '/cadences', icon: <Target className="w-4 h-4" />, label: 'Cadence 波段' },
+          { to: '/proposals', icon: <Presentation className="w-4 h-4" />, label: '提案管理' },
           { to: '/icp', icon: <Crosshair className="w-4 h-4" />, label: 'ICP 設定' },
           { to: '/performance', icon: <TrendingUp className="w-4 h-4" />, label: '績效報告' },
           ...(user?.role === 'admin' ? [{ to: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '業績 Dashboard' }] : []),

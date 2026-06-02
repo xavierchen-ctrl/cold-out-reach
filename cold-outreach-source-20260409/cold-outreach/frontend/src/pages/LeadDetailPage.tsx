@@ -9,7 +9,7 @@ import {
   getLeadTags, getTags, addLeadTags, removeLeadTag,
   getAttachments, uploadAttachment, downloadAttachment, deleteAttachment,
   getLeadCadences, getCalls, createCall, recalcEngagement,
-  analyzeSignals, generateEmail, generateProposal,
+  analyzeSignals, generateEmail, generateProposalEmail,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, EmailTemplate, Contact, Tag, Attachment, CadenceEnrollment, CallLog, CallOutcome, CALL_OUTCOME_LABELS, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, ACTIVITY_LABELS } from '@/types'
@@ -413,7 +413,7 @@ export default function LeadDetailPage() {
     setGeneratingProposal(true)
     setProposalResult(null)
     try {
-      const res = await generateProposal({ lead_id: id, product: proposalProduct, tone: proposalTone })
+      const res = await generateProposalEmail({ lead_id: id, product: proposalProduct, tone: proposalTone })
       setProposalResult(res.data)
     } catch (e: unknown) {
       alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '提案信生成失敗')

@@ -257,6 +257,20 @@ export const createCall = (leadId: string, data: Record<string, unknown>) =>
   api.post(`/leads/${leadId}/calls`, data)
 export const getCallStats = () => api.get('/calls/stats')
 
+// ── 提案管理 ───────────────────────────────────────────────────────────────────
+export const getProposals = () => api.get('/proposals')
+export const getLeadProposals = (leadId: string) => api.get(`/proposals/lead/${leadId}`)
+export const getProposal = (id: string) => api.get(`/proposals/${id}`)
+export const generateProposal = (data: {
+  lead_id: string
+  product_focus: string
+  budget_range: string
+  extra_context?: string
+}) => api.post('/proposals/generate', data)
+export const updateProposal = (id: string, data: Record<string, unknown>) =>
+  api.patch(`/proposals/${id}`, data)
+export const deleteProposal = (id: string) => api.delete(`/proposals/${id}`)
+
 // ── Round 4: 互動熱度 ──────────────────────────────────────────────────────────
 export const recalcEngagement = (leadId: string) =>
   api.post(`/leads/${leadId}/recalc_engagement`)
@@ -286,6 +300,6 @@ export const batchAnalyzeSignals = (lead_ids?: string[], all_with_website?: bool
 export const generateEmail = (data: {website_url: string, product: string, lead_id?: string, tone?: string}) =>
   api.post('/ai/generate-email', data)
 
-// ── 提案信生成 ─────────────────────────────────────────────────────────────────
-export const generateProposal = (data: { lead_id: string; product: string; tone?: string }) =>
+// ── 提案信生成（舊版 AI email，保留相容）────────────────────────────────────────
+export const generateProposalEmail = (data: { lead_id: string; product: string; tone?: string }) =>
   api.post('/ai/generate-proposal', data)

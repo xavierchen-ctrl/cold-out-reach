@@ -21,6 +21,7 @@ from routers import auth, leads, activities, gmail, ai, stats, scraper, scoring,
 from routers import templates, email_scheduler, tracking, reports
 from routers import contacts, tags, attachments, ab_test, webhooks, notifications, analytics, keyword_tracker, weekly_report
 from routers import cadence, call_log, enrich, icp, signals, teams
+from routers import proposals
 
 
 @asynccontextmanager
@@ -134,6 +135,23 @@ async def lifespan(app: FastAPI):
                 )
             """))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id)"))
+            # Proposal management
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS proposals (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    lead_id UUID NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+                    title VARCHAR(500) NOT NULL,
+                    product_focus VARCHAR(255),
+                    budget_range VARCHAR(100),
+                    status VARCHAR(50) DEFAULT 'draft',
+                    content JSONB,
+                    email_subject VARCHAR(500),
+                    email_body TEXT,
+                    created_by UUID REFERENCES users(id),
+                    created_at TIMESTAMP DEFAULT NOW(),
+                    updated_at TIMESTAMP DEFAULT NOW()
+                )
+            """))
             conn.commit()
     except Exception as e:
         print(f"Migration skip: {e}")
@@ -188,6 +206,7 @@ app.include_router(enrich.router)
 app.include_router(icp.router)
 app.include_router(signals.router)
 app.include_router(teams.router)
+app.include_router(proposals.router)
 
 
 # ── One-time DB init endpoint (safe: only creates if not exists) ───────────────
