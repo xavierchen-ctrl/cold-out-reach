@@ -1523,9 +1523,14 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                         _p = _tp
                     if not _e:
                         _e = _te
-                    # debug: 一律印出 email 候選清單，方便排查
-                    _email_candidates = re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', _text)
-                    logger.info(f"  Website PW debug {website_url}: found={_e!r} candidates={_email_candidates[:5]!r} tel_email={_te!r} html={len(pw_html)}")
+                    # Fallback: search raw HTML directly for email patterns
+                    # Catches emails in data-attributes, JS strings, or markup not captured by get_text()
+                    if not _e:
+                        for _raw_e in re.findall(r'[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}', pw_html):
+                            _re_lower = _raw_e.lower()
+                            if not any(_re_lower.startswith(pfx) for pfx in SYSTEM_EMAIL_PREFIXES):
+                                _e = _raw_e
+                                break
                     if _p and not results[idx].get('phone'):
                         results[idx]['phone'] = _p
                         logger.info(f"  Website PW: {website_url} → phone={_p!r}")
