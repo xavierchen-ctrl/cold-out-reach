@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from database import get_db
 from models import Lead, Proposal, ProposalStatus, User
-from pptx_generator import generate_pptx, extract_design_tokens
+from pptx_generator import generate_pptx, extract_design_tokens, embed_external_images
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -277,7 +277,12 @@ async def upload_template(
             shutil.copyfileobj(file.file, f)
     except Exception as e:
         raise HTTPException(500, f"無法儲存檔案: {e}")
-    return {"ok": True, "filename": base}
+
+    # Pre-process: download externally-linked images and embed them so that
+    # _copy_slide can later re-use them without PowerPoint's blocked-download warning.
+    embedded = embed_external_images(str(dest))
+
+    return {"ok": True, "filename": base, "embedded_images": embedded}
 
 
 @router.put("/templates/{filename}/activate")

@@ -282,18 +282,29 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     except Exception:
         pass
 
-    # ── Solid-fill shapes: re-create via add_shape (no XML copy) ─────────────
+    # ── Shapes: re-create via python-pptx API (no XML copy) ─────────────────
     for shape in src_slide.shapes:
         try:
-            # Skip any shape that has visible text
+            # Skip shapes with visible text
             if shape.has_text_frame and shape.text_frame.text.strip():
                 continue
-            # fore_color.rgb raises for non-solid fills (image, gradient, none)
-            rgb = shape.fill.fore_color.rgb
+
+            # ① Picture shapes — re-embed the blob (safe after embed_external_images)
+            try:
+                blob = shape.image.blob
+                l, t, w, h = _sb(shape.left, shape.top, shape.width, shape.height)
+                new_slide.shapes.add_picture(BytesIO(blob), l, t, w, h)
+                continue
+            except Exception:
+                pass  # not a picture shape or blob unavailable
+
+            # ② Solid-fill geometric shapes — re-create with clean API call
+            rgb = shape.fill.fore_color.rgb  # raises for non-solid fills
             l, t, w, h = _sb(shape.left, shape.top, shape.width, shape.height)
             _rect(new_slide, l, t, w, h, rgb)
+
         except Exception:
-            pass  # gradient / image / transparent / unsupported — skip silently
+            pass  # gradient / transparent / unsupported — skip silently
 
     return new_slide
 
@@ -715,3 +726,127 @@ def generate_pptx(proposal: dict) -> BytesIO:
     finally:
         # Restore palette so module state is clean for the next request
         NAVY, ORANGE, TEAL, FONT = orig_navy, orig_orange, orig_teal, orig_font
+
+
+# ─────────────────────────── Image pre-embedding ──────────────────────────────
+
+def embed_external_images(pptx_path: str) -> int:
+    """
+    Scan a PPTX for externally-linked images (r:link URLs), download them,
+    and replace with embedded copies (r:embed).  Modifies the file in-place.
+    Returns the number of images successfully embedded.  Never raises.
+
+    Call this once when a reference PPTX is uploaded so that _copy_slide
+    can later read shape.image.blob without hitting blocked-download errors.
+    """
+    import zipfile, shutil, re
+    try:
+        import httpx
+    except ImportError:
+        return 0
+
+    NS_R     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    IMG_TYPE = f"{NS_R}/image"
+
+    tmp_path = pptx_path + ".processing"
+    count    = 0
+
+    try:
+        with zipfile.ZipFile(pptx_path, 'r') as zin:
+            files = {n: zin.read(n) for n in zin.namelist()}
+
+        media_idx     = sum(1 for n in files if n.startswith('ppt/media/')) + 1
+        slide_rels_re = re.compile(r'^ppt/slides/_rels/(slide\d+\.xml)\.rels$')
+        added_exts: set = set()
+
+        for rels_name in sorted(files.keys()):
+            m = slide_rels_re.match(rels_name)
+            if not m:
+                continue
+            slide_name = f'ppt/slides/{m.group(1)}'
+            if slide_name not in files:
+                continue
+
+            rels_text  = files[rels_name].decode('utf-8')
+            slide_text = files[slide_name].decode('utf-8')
+
+            # Find external image Relationship entries
+            rId_to_url: dict = {}
+            for rel_tag in re.findall(r'<Relationship\b.*?/>', rels_text, re.DOTALL):
+                if 'TargetMode="External"' not in rel_tag:
+                    continue
+                if IMG_TYPE not in rel_tag:
+                    continue
+                rid_m = re.search(r'\bId="([^"]+)"',            rel_tag)
+                url_m = re.search(r'\bTarget="(https?://[^"]+)"', rel_tag)
+                if rid_m and url_m:
+                    rId_to_url[rid_m.group(1)] = url_m.group(1)
+
+            if not rId_to_url:
+                continue
+
+            rId_to_fname: dict = {}
+            for rId, url in rId_to_url.items():
+                try:
+                    resp = httpx.get(url, timeout=15, follow_redirects=True)
+                    resp.raise_for_status()
+                    ct = resp.headers.get('content-type', '').lower()
+                    if   'jpeg' in ct or 'jpg' in ct: ext, mime = '.jpg', 'image/jpeg'
+                    elif 'gif'  in ct:                ext, mime = '.gif', 'image/gif'
+                    elif 'webp' in ct:                ext, mime = '.webp','image/webp'
+                    else:                             ext, mime = '.png', 'image/png'
+
+                    fname = f'image_ext_{media_idx}{ext}'
+                    files[f'ppt/media/{fname}'] = resp.content
+                    rId_to_fname[rId] = fname
+                    added_exts.add((ext.lstrip('.'), mime))
+                    media_idx += 1
+                    count     += 1
+                except Exception:
+                    pass
+
+            if not rId_to_fname:
+                continue
+
+            # Update rels: swap External URL → internal relative path
+            for rId, fname in rId_to_fname.items():
+                url = rId_to_url[rId]
+                rels_text = rels_text.replace(f'Target="{url}"',
+                                              f'Target="../media/{fname}"')
+                rels_text = rels_text.replace(' TargetMode="External"', '')
+                rels_text = rels_text.replace('TargetMode="External" ', '')
+
+            # Update slide XML: r:link="rId" → r:embed="rId"
+            for rId in rId_to_fname:
+                slide_text = re.sub(
+                    r'(\w+):link="' + re.escape(rId) + '"',
+                    lambda mo, r=rId: f'{mo.group(1)}:embed="{r}"',
+                    slide_text,
+                )
+
+            files[rels_name]  = rels_text.encode('utf-8')
+            files[slide_name] = slide_text.encode('utf-8')
+
+        # Add any new image extensions to [Content_Types].xml
+        if added_exts and '[Content_Types].xml' in files:
+            ct = files['[Content_Types].xml'].decode('utf-8')
+            for ext_no_dot, mime in added_exts:
+                if f'Extension="{ext_no_dot}"' not in ct:
+                    ct = ct.replace('</Types>',
+                        f'  <Default Extension="{ext_no_dot}" ContentType="{mime}"/>\n</Types>')
+            files['[Content_Types].xml'] = ct.encode('utf-8')
+
+        if count > 0:
+            with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+                for n, data in files.items():
+                    zout.writestr(n, data)
+            shutil.move(tmp_path, pptx_path)
+
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
+    return count
