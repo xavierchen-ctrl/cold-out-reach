@@ -255,14 +255,16 @@ def _copy_slide(dest_prs: Presentation, src_slide):
             break
     new_slide = dest_prs.slides.add_slide(layout)
 
-    # Copy slide background fill
+    # Copy slide background fill (skip if it uses an image — can't re-embed safely)
     try:
         src_bg = src_slide.background._element
-        dst_bg = new_slide.background._element
-        for child in list(dst_bg):
-            dst_bg.remove(child)
-        for child in list(src_bg):
-            dst_bg.append(copy.deepcopy(child))
+        _BF = "{http://schemas.openxmlformats.org/drawingml/2006/main}blipFill"
+        if not any(True for _ in src_bg.iter(_BF)):
+            dst_bg = new_slide.background._element
+            for child in list(dst_bg):
+                dst_bg.remove(child)
+            for child in list(src_bg):
+                dst_bg.append(copy.deepcopy(child))
     except Exception:
         pass
 
@@ -275,11 +277,14 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     scale_x = dest_prs.slide_width  / max(src_w, 1)
     scale_y = dest_prs.slide_height / max(src_h, 1)
 
+    _NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    _DW   = int(dest_prs.slide_width)
+    _DH   = int(dest_prs.slide_height)
+
     def _scale_xfrm(elem_copy):
-        NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
-        for xfrm in elem_copy.iter(f"{NS_A}xfrm"):
-            off = xfrm.find(f"{NS_A}off")
-            ext = xfrm.find(f"{NS_A}ext")
+        for xfrm in elem_copy.iter(f"{_NS_A}xfrm"):
+            off = xfrm.find(f"{_NS_A}off")
+            ext = xfrm.find(f"{_NS_A}ext")
             if off is not None:
                 try:
                     off.set('x', str(round(int(off.get('x', 0)) * scale_x)))
@@ -293,30 +298,56 @@ def _copy_slide(dest_prs: Presentation, src_slide):
                 except Exception:
                     pass
 
-    NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    def _clamp_xfrm(elem_copy):
+        """Keep copied shapes entirely within the destination slide boundary."""
+        for xfrm in elem_copy.iter(f"{_NS_A}xfrm"):
+            off = xfrm.find(f"{_NS_A}off")
+            ext = xfrm.find(f"{_NS_A}ext")
+            if off is None or ext is None:
+                continue
+            try:
+                x  = max(0, int(off.get('x',  0)))
+                y  = max(0, int(off.get('y',  0)))
+                cx = max(1, int(ext.get('cx', 1)))
+                cy = max(1, int(ext.get('cy', 1)))
+                x  = min(x,  _DW - 1)
+                y  = min(y,  _DH - 1)
+                cx = min(cx, _DW - x)
+                cy = min(cy, _DH - y)
+                off.set('x',  str(x));  off.set('y',  str(y))
+                ext.set('cx', str(cx)); ext.set('cy', str(cy))
+            except Exception:
+                pass
+
     src_tree = src_slide.shapes._spTree
     dst_tree = new_slide.shapes._spTree
     while len(dst_tree) > 2:
         dst_tree.remove(dst_tree[-1])
 
-    # ── Solid-fill decorative shapes (no text) ────────────────────────────────
+    # ── Decorative shapes only: solid fills, no text, no image fill ───────────
+    _BLIPFILL = f"{_NS_A}blipFill"
     for elem in list(src_tree)[2:]:
         if not elem.tag.endswith("}sp"):
             continue
-        if any((t.text or "").strip() for t in elem.iter(f"{NS_A}t")):
+        if any((t.text or "").strip() for t in elem.iter(f"{_NS_A}t")):
             continue
+        if any(True for _ in elem.iter(_BLIPFILL)):
+            continue  # image-fill shape: rId invalid in dest → skip
         elem_copy = copy.deepcopy(elem)
         _scale_xfrm(elem_copy)
+        _clamp_xfrm(elem_copy)
         dst_tree.append(elem_copy)
 
     # ── Images: re-embed from blob (skip externally-linked ones) ─────────────
     for shape in src_slide.shapes:
         try:
             blob = shape.image.blob       # raises AttributeError/ValueError for non-pics or external links
-            left   = round(shape.left   * scale_x)
-            top    = round(shape.top    * scale_y)
-            width  = round(shape.width  * scale_x)
-            height = round(shape.height * scale_y)
+            left   = max(0, round(shape.left   * scale_x))
+            top    = max(0, round(shape.top    * scale_y))
+            width  = max(1, round(shape.width  * scale_x))
+            height = max(1, round(shape.height * scale_y))
+            width  = min(width,  _DW - left)
+            height = min(height, _DH - top)
             new_slide.shapes.add_picture(BytesIO(blob), left, top, width, height)
         except Exception:
             pass  # external link or non-picture shape — skip silently
