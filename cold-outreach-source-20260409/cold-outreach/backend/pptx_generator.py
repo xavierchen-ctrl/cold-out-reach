@@ -246,8 +246,6 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     - Externally-linked images (the ones PowerPoint blocks) are skipped.
     - Text shapes are skipped; caller layers fresh AI content on top.
     """
-    from io import BytesIO
-
     layout = dest_prs.slide_layouts[-1]
     for lay in dest_prs.slide_layouts:
         if "blank" in lay.name.lower():
@@ -324,33 +322,23 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     while len(dst_tree) > 2:
         dst_tree.remove(dst_tree[-1])
 
-    # ── Decorative shapes only: solid fills, no text, no image fill ───────────
-    _BLIPFILL = f"{_NS_A}blipFill"
+    # ── Decorative shapes only: solid/gradient fills, no text, no image ref ─────
+    # We deliberately skip ALL image-bearing shapes from reference slides.
+    # Images in reference slides are externally-linked (or have r:embed+r:link
+    # metadata that makes PowerPoint show "blocked auto-download" warnings).
+    # Reference slides contribute only geometry and color — not image content.
+    _BLIP = f"{_NS_A}blip"
     for elem in list(src_tree)[2:]:
         if not elem.tag.endswith("}sp"):
             continue
         if any((t.text or "").strip() for t in elem.iter(f"{_NS_A}t")):
             continue
-        if any(True for _ in elem.iter(_BLIPFILL)):
-            continue  # image-fill shape: rId invalid in dest → skip
+        if any(True for _ in elem.iter(_BLIP)):
+            continue  # shape contains an image reference — skip entirely
         elem_copy = copy.deepcopy(elem)
         _scale_xfrm(elem_copy)
         _clamp_xfrm(elem_copy)
         dst_tree.append(elem_copy)
-
-    # ── Images: re-embed from blob (skip externally-linked ones) ─────────────
-    for shape in src_slide.shapes:
-        try:
-            blob = shape.image.blob       # raises AttributeError/ValueError for non-pics or external links
-            left   = max(0, round(shape.left   * scale_x))
-            top    = max(0, round(shape.top    * scale_y))
-            width  = max(1, round(shape.width  * scale_x))
-            height = max(1, round(shape.height * scale_y))
-            width  = min(width,  _DW - left)
-            height = min(height, _DH - top)
-            new_slide.shapes.add_picture(BytesIO(blob), left, top, width, height)
-        except Exception:
-            pass  # external link or non-picture shape — skip silently
 
     return new_slide
 
