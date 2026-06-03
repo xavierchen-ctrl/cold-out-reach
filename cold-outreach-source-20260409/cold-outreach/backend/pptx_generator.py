@@ -87,6 +87,8 @@ def _box(slide, l, t, w, h, *,
     tf.margin_right = Inches(ml)
     tf.margin_top   = Inches(mt)
     tf.margin_bottom = Inches(mt)
+    # add_shape defaults to center vertical anchor; force top so text starts at card top
+    tf._txBody.bodyPr.set('anchor', 't')
     if text:
         p = tf.paragraphs[0]
         p.alignment = align
