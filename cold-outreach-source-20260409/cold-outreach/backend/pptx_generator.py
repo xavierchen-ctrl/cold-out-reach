@@ -237,10 +237,14 @@ def _add_slide(prs: Presentation, ref_slide=None):
 
 def _copy_slide(dest_prs: Presentation, src_slide):
     """
-    Copy visual-only (non-text) elements from src_slide into a new slide in dest_prs.
-    Only solid-fill <p:sp> shapes (no text, no images, no charts) are copied and
-    scaled to the destination slide dimensions to avoid overflow and blocked-image warnings.
+    Copy visual elements from src_slide into a new slide in dest_prs:
+    - Solid-fill <p:sp> shapes without text are copied and coordinate-scaled.
+    - Embedded images are re-embedded via blob so they display without warnings.
+    - Externally-linked images (the ones PowerPoint blocks) are skipped.
+    - Text shapes are skipped; caller layers fresh AI content on top.
     """
+    from io import BytesIO
+
     layout = dest_prs.slide_layouts[-1]
     for lay in dest_prs.slide_layouts:
         if "blank" in lay.name.lower():
@@ -259,7 +263,7 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     except Exception:
         pass
 
-    # Compute scale factors (source slide may be a different size, e.g. 13.33" widescreen)
+    # Scale factors — reference may be 13.33×7.5" while output is 10×5.625"
     try:
         src_w = src_slide.part.presentation.slide_width
         src_h = src_slide.part.presentation.slide_height
@@ -268,22 +272,8 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     scale_x = dest_prs.slide_width  / max(src_w, 1)
     scale_y = dest_prs.slide_height / max(src_h, 1)
 
-    NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
-    src_tree = src_slide.shapes._spTree
-    dst_tree = new_slide.shapes._spTree
-    while len(dst_tree) > 2:
-        dst_tree.remove(dst_tree[-1])
-
-    for elem in list(src_tree)[2:]:
-        # Only copy regular shape elements (<p:sp>); skip pictures, graphic frames, etc.
-        if not elem.tag.endswith("}sp"):
-            continue
-        # Skip shapes that have any text content
-        if any((t.text or "").strip() for t in elem.iter(f"{NS_A}t")):
-            continue
-
-        elem_copy = copy.deepcopy(elem)
-        # Scale the transform so shapes land correctly in the destination dimensions
+    def _scale_xfrm(elem_copy):
+        NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
         for xfrm in elem_copy.iter(f"{NS_A}xfrm"):
             off = xfrm.find(f"{NS_A}off")
             ext = xfrm.find(f"{NS_A}ext")
@@ -299,7 +289,34 @@ def _copy_slide(dest_prs: Presentation, src_slide):
                     ext.set('cy', str(round(int(ext.get('cy', 0)) * scale_y)))
                 except Exception:
                     pass
+
+    NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
+    src_tree = src_slide.shapes._spTree
+    dst_tree = new_slide.shapes._spTree
+    while len(dst_tree) > 2:
+        dst_tree.remove(dst_tree[-1])
+
+    # ── Solid-fill decorative shapes (no text) ────────────────────────────────
+    for elem in list(src_tree)[2:]:
+        if not elem.tag.endswith("}sp"):
+            continue
+        if any((t.text or "").strip() for t in elem.iter(f"{NS_A}t")):
+            continue
+        elem_copy = copy.deepcopy(elem)
+        _scale_xfrm(elem_copy)
         dst_tree.append(elem_copy)
+
+    # ── Images: re-embed from blob (skip externally-linked ones) ─────────────
+    for shape in src_slide.shapes:
+        try:
+            blob = shape.image.blob       # raises AttributeError/ValueError for non-pics or external links
+            left   = round(shape.left   * scale_x)
+            top    = round(shape.top    * scale_y)
+            width  = round(shape.width  * scale_x)
+            height = round(shape.height * scale_y)
+            new_slide.shapes.add_picture(BytesIO(blob), left, top, width, height)
+        except Exception:
+            pass  # external link or non-picture shape — skip silently
 
     return new_slide
 
