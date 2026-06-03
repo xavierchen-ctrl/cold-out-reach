@@ -246,13 +246,23 @@ async def upload_template(
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
 ):
-    if not (file.filename or "").lower().endswith(".pptx"):
+    # Check content-type OR filename extension (filename may be garbled for non-ASCII names)
+    pptx_mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    fname = file.filename or ""
+    is_pptx_mime = (file.content_type or "").lower() == pptx_mime
+    is_pptx_ext  = fname.lower().endswith(".pptx")
+    if not is_pptx_mime and not is_pptx_ext:
         raise HTTPException(400, "只支援 .pptx 檔案")
+
     _TEMPLATES_DIR.mkdir(exist_ok=True)
-    safe_name = re.sub(r"[^\w\-.]", "_", file.filename or "upload.pptx")
-    dest = _TEMPLATES_DIR / safe_name
+
+    # Build a safe filename; keep CJK chars (they ARE \w in Python 3)
+    base = re.sub(r"[^\w\-.]", "_", fname) if fname else "upload"
+    if not base.lower().endswith(".pptx"):
+        base = base + ".pptx"
+    dest = _TEMPLATES_DIR / base
     dest.write_bytes(await file.read())
-    return {"ok": True, "filename": safe_name}
+    return {"ok": True, "filename": base}
 
 
 @router.put("/templates/{filename}/activate")
