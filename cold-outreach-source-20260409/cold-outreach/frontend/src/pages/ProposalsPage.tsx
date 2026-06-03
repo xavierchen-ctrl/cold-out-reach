@@ -368,7 +368,7 @@ function Phase3({ data }: { data: ProposalContent['phase3'] }) {
 
 function Phase4({ data }: { data: ProposalContent['phase4'] }) {
   if (!data) return null
-  const dims = data.creative_dimensions || {} as ProposalContent['phase4']['creative_dimensions']
+  const dims = data.creative_dimensions || {} as NonNullable<ProposalContent['phase4']>['creative_dimensions']
   const dimList = [
     { key: 'trust_building', color: 'bg-blue-50 border-blue-200', badge: 'text-blue-700 bg-blue-100' },
     { key: 'pain_point', color: 'bg-orange-50 border-orange-200', badge: 'text-orange-700 bg-orange-100' },
