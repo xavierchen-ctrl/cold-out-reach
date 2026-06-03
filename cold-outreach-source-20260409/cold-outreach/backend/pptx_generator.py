@@ -17,7 +17,7 @@ import json
 from io import BytesIO
 from datetime import datetime
 
-from lxml import etree as _et
+
 from pptx import Presentation
 from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
@@ -238,8 +238,8 @@ def _add_slide(prs: Presentation, ref_slide=None):
 def _copy_slide(dest_prs: Presentation, src_slide):
     """
     Copy visual-only (non-text) elements from src_slide into a new slide in dest_prs.
-    Shapes that contain text are skipped so the caller can layer fresh AI content on top.
-    Image relationships are remapped where possible.
+    Only solid-fill <p:sp> shapes (no text, no images, no charts) are copied and
+    scaled to the destination slide dimensions to avoid overflow and blocked-image warnings.
     """
     layout = dest_prs.slide_layouts[-1]
     for lay in dest_prs.slide_layouts:
@@ -259,47 +259,47 @@ def _copy_slide(dest_prs: Presentation, src_slide):
     except Exception:
         pass
 
-    # Copy only shapes that have no text content (decorative/structural shapes)
-    NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    # Compute scale factors (source slide may be a different size, e.g. 13.33" widescreen)
+    try:
+        src_w = src_slide.part.presentation.slide_width
+        src_h = src_slide.part.presentation.slide_height
+    except Exception:
+        src_w, src_h = SW, SH
+    scale_x = dest_prs.slide_width  / max(src_w, 1)
+    scale_y = dest_prs.slide_height / max(src_h, 1)
+
+    NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
     src_tree = src_slide.shapes._spTree
     dst_tree = new_slide.shapes._spTree
     while len(dst_tree) > 2:
         dst_tree.remove(dst_tree[-1])
 
     for elem in list(src_tree)[2:]:
-        has_text = any(
-            (t.text or "").strip()
-            for t in elem.iter(f"{{{NS_A}}}t")
-        )
-        if has_text:
-            continue  # caller adds fresh content; skip original text shapes
-        dst_tree.append(copy.deepcopy(elem))
+        # Only copy regular shape elements (<p:sp>); skip pictures, graphic frames, etc.
+        if not elem.tag.endswith("}sp"):
+            continue
+        # Skip shapes that have any text content
+        if any((t.text or "").strip() for t in elem.iter(f"{NS_A}t")):
+            continue
 
-    # Remap image/media relationship IDs
-    try:
-        rId_map = {}
-        for rId, rel in src_slide.part.rels.items():
-            try:
-                if rel.is_external:
-                    new_rId = new_slide.part.relate_to(
-                        rel.target_ref, rel.reltype, is_external=True)
-                else:
-                    new_rId = new_slide.part.relate_to(rel.target_part, rel.reltype)
-                if new_rId != rId:
-                    rId_map[rId] = new_rId
-            except Exception:
-                pass
-        if rId_map:
-            xml_str = _et.tostring(dst_tree).decode("utf-8")
-            for old_id, new_id in rId_map.items():
-                xml_str = xml_str.replace(f'"{old_id}"', f'"{new_id}"')
-            new_tree = _et.fromstring(xml_str.encode("utf-8"))
-            while len(dst_tree):
-                dst_tree.remove(dst_tree[-1])
-            for child in new_tree:
-                dst_tree.append(child)
-    except Exception:
-        pass
+        elem_copy = copy.deepcopy(elem)
+        # Scale the transform so shapes land correctly in the destination dimensions
+        for xfrm in elem_copy.iter(f"{NS_A}xfrm"):
+            off = xfrm.find(f"{NS_A}off")
+            ext = xfrm.find(f"{NS_A}ext")
+            if off is not None:
+                try:
+                    off.set('x', str(round(int(off.get('x', 0)) * scale_x)))
+                    off.set('y', str(round(int(off.get('y', 0)) * scale_y)))
+                except Exception:
+                    pass
+            if ext is not None:
+                try:
+                    ext.set('cx', str(round(int(ext.get('cx', 0)) * scale_x)))
+                    ext.set('cy', str(round(int(ext.get('cy', 0)) * scale_y)))
+                except Exception:
+                    pass
+        dst_tree.append(elem_copy)
 
     return new_slide
 
