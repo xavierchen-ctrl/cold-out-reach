@@ -229,7 +229,7 @@ def _slide_phase1(prs, p1: dict):
     _section_label(slide, "合作夥伴認證", lx, ty, DARK_BLUE)
     _, tf = _box(slide, lx, ty + Cm(0.55), UW / 2 - Cm(0.5), Cm(4.5), fill=INDIGO_BG)
     for c in certs:
-        _para(tf, f"✓  {c}", size=10, color=INDIGO)
+        _para(tf, f"[v]  {c}", size=10, color=INDIGO)
 
     # Services
     services = (p1 or {}).get("services", [
@@ -278,7 +278,7 @@ def _slide_phase2a(prs, p2: dict):
     if insight:
         ty3 = ty2 + Cm(4.1)
         _, tf = _box(slide, ML, ty3, UW, Cm(1.2),
-                     fill=BLUE_BG, text=f"💡 關鍵洞察：{insight}",
+                     fill=BLUE_BG, text=f"[!] 關鍵洞察：{insight}",
                      size=10, bold=True, color=DARK_BLUE)
 
 
@@ -362,7 +362,7 @@ def _slide_phase3(prs, p3: dict):
     _, tf2 = _box(slide, ML + half + Cm(0.5), ty3 + Cm(0.55), half, Cm(3.5), fill=GREEN_BG)
     for j, opp in enumerate(opps[:6]):
         target_tf = tf1 if j < 3 else tf2
-        _para(target_tf, f"✓  {_truncate(opp, 60)}", size=10, color=DARK)
+        _para(target_tf, f"[v]  {_truncate(opp, 60)}", size=10, color=DARK)
 
 
 def _slide_phase4(prs, p4: dict):
@@ -506,7 +506,7 @@ def _slide_phase5b(prs, p5: dict):
     if timeline_note:
         ty2 = ty + Cm(0.3)
         _box(slide, ML, ty2, UW, Cm(1.0),
-             fill=ORANGE_BG, text=f"⏱  {timeline_note}",
+             fill=ORANGE_BG, text=f"[T] {timeline_note}",
              size=10, color=AMBER)
 
     # CTA footer

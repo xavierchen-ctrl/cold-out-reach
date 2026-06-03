@@ -356,11 +356,12 @@ async def export_proposal_pptx(
 
     try:
         buf = generate_pptx(_serialize(proposal))
-    except Exception as e:
+    except BaseException as e:
         raise HTTPException(status_code=500, detail=f"PPT 產生失敗：{str(e)}")
 
-    safe_title = (proposal.title or "proposal").replace("/", "-").replace("\\", "-")[:60]
-    filename = f"{safe_title}.pptx"
+    # Content-Disposition filename must be ASCII-safe for proxies/edge nodes
+    ascii_title = re.sub(r"[^\x00-\x7F]", "", proposal.title or "proposal").strip()
+    filename = f"{(ascii_title or 'proposal')[:60]}.pptx"
 
     return Response(
         content=buf.getvalue(),
