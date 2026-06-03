@@ -20,7 +20,18 @@ from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
-TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "wavenet_template.pptx")
+_TEMPLATES_DIR   = os.path.join(os.path.dirname(__file__), "templates")
+_DEFAULT_TEMPLATE = os.path.join(_TEMPLATES_DIR, "wavenet_template.pptx")
+_ACTIVE_CFG       = os.path.join(_TEMPLATES_DIR, "active_template.txt")
+
+
+def _get_template_path() -> str:
+    if os.path.exists(_ACTIVE_CFG):
+        name = open(_ACTIVE_CFG).read().strip()
+        path = os.path.join(_TEMPLATES_DIR, name)
+        if os.path.exists(path):
+            return path
+    return _DEFAULT_TEMPLATE
 
 # ── Slide geometry matching actual Wavenet template (10 × 5.625 in) ──────────
 SW   = Emu(9144000)    # 10 in
@@ -520,7 +531,7 @@ def _slide_phase5b(prs, p5: dict, phase_num: str = "06"):
 # ─────────────────────────── Main entry ───────────────────────────────────────
 
 def generate_pptx(proposal: dict) -> BytesIO:
-    prs = Presentation(TEMPLATE_PATH)
+    prs = Presentation(_get_template_path())
 
     _update_cover(prs.slides[0], proposal)
     _delete_slides_from(prs, keep_count=10)

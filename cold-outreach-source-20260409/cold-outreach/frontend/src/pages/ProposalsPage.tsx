@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx } from '@/lib/api'
+import {
+  getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
+  listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
+} from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,7 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Plus, Trash2, Mail, ChevronDown, ChevronUp, Copy, CheckCheck,
-  Loader2, FileText, BarChart3, Lightbulb, DollarSign, Building2, Download
+  Loader2, FileText, BarChart3, Lightbulb, DollarSign, Building2, Download,
+  Upload, CheckCircle2, X, FolderOpen,
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -115,6 +119,149 @@ const PHASE_COLORS = [
   'bg-purple-50 border-purple-200',
   'bg-orange-50 border-orange-200',
 ]
+
+// ── Template Manager ──────────────────────────────────────────────────────────
+
+interface PptTemplate {
+  filename: string
+  size_kb: number
+  active: boolean
+}
+
+function TemplateManager() {
+  const [open, setOpen] = useState(false)
+  const [templates, setTemplates] = useState<PptTemplate[]>([])
+  const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await listProposalTemplates()
+      setTemplates(Array.isArray(res.data) ? res.data : [])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (open) load()
+  }, [open])
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    try {
+      await uploadProposalTemplate(file)
+      await load()
+    } catch {
+      alert('上傳失敗，請確認是 .pptx 格式')
+    } finally {
+      setUploading(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleActivate = async (filename: string) => {
+    await activateProposalTemplate(filename)
+    await load()
+  }
+
+  const handleDelete = async (filename: string) => {
+    if (!confirm(`確定刪除 ${filename}？`)) return
+    await deleteProposalTemplate(filename)
+    await load()
+  }
+
+  return (
+    <div className="mb-5 border rounded-lg overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 hover:bg-slate-100 text-sm font-medium text-slate-700 transition-colors"
+        onClick={() => setOpen(v => !v)}
+      >
+        <span className="flex items-center gap-2">
+          <FolderOpen className="w-4 h-4 text-slate-500" />
+          PPT 範本庫
+          <span className="text-xs text-slate-400 font-normal">上傳更多 PPTX 讓 AI 學習您的設計風格</span>
+        </span>
+        {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+      </button>
+
+      {open && (
+        <div className="p-4 bg-white">
+          {/* Upload button */}
+          <label className="inline-flex items-center gap-2 cursor-pointer">
+            <input
+              type="file"
+              accept=".pptx"
+              className="hidden"
+              onChange={handleFileChange}
+              disabled={uploading}
+            />
+            <span className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
+              {uploading
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <Upload className="w-3.5 h-3.5" />}
+              {uploading ? '上傳中...' : '上傳 PPTX'}
+            </span>
+          </label>
+          <p className="text-xs text-slate-400 mt-1 mb-3">
+            支援 .pptx 格式 · 上傳後可設為使用中範本 · 下次產生 PPT 即套用新設計
+          </p>
+
+          {/* Template list */}
+          {loading ? (
+            <div className="flex items-center gap-2 text-sm text-slate-400 py-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> 載入中...
+            </div>
+          ) : templates.length === 0 ? (
+            <p className="text-sm text-slate-400 py-2">尚無範本（使用內建 Wavenet 範本）</p>
+          ) : (
+            <div className="space-y-2">
+              {templates.map(tpl => (
+                <div
+                  key={tpl.filename}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg border text-sm ${
+                    tpl.active
+                      ? 'border-blue-300 bg-blue-50'
+                      : 'border-slate-200 bg-white'
+                  }`}
+                >
+                  <FileText className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="flex-1 font-medium text-slate-700 truncate">{tpl.filename}</span>
+                  <span className="text-xs text-slate-400">{tpl.size_kb} KB</span>
+
+                  {tpl.active ? (
+                    <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-medium shrink-0">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> 使用中
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleActivate(tpl.filename)}
+                      className="text-xs text-blue-600 hover:underline shrink-0"
+                    >
+                      啟用
+                    </button>
+                  )}
+
+                  {tpl.filename !== 'wavenet_template.pptx' && (
+                    <button
+                      onClick={() => handleDelete(tpl.filename)}
+                      className="text-slate-400 hover:text-red-500 shrink-0"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Generate Dialog ───────────────────────────────────────────────────────────
 
@@ -717,6 +864,8 @@ export default function ProposalsPage() {
           <Plus className="w-4 h-4 mr-1.5" /> 產生提案
         </Button>
       </div>
+
+      <TemplateManager />
 
       <div className="mb-4">
         <Input

@@ -1,9 +1,10 @@
 import os
 import re
 import json
+from pathlib import Path
 
 import google.generativeai as genai
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -217,6 +218,68 @@ def _parse_gemini_response(raw: str) -> dict:
     raw = re.sub(r'^```\s*', '', raw, flags=re.MULTILINE)
     raw = re.sub(r'\s*```$', '', raw)
     return json.loads(raw)
+
+
+# ── Template management ───────────────────────────────────────────────────────
+
+_TEMPLATES_DIR  = Path(__file__).parent.parent / "templates"
+_ACTIVE_CFG     = _TEMPLATES_DIR / "active_template.txt"
+_DEFAULT_TPL    = "wavenet_template.pptx"
+
+
+@router.get("/templates")
+async def list_templates(current_user: User = Depends(get_current_user)):
+    _TEMPLATES_DIR.mkdir(exist_ok=True)
+    active = _ACTIVE_CFG.read_text().strip() if _ACTIVE_CFG.exists() else _DEFAULT_TPL
+    result = []
+    for f in sorted(_TEMPLATES_DIR.glob("*.pptx"), key=lambda x: x.stat().st_mtime, reverse=True):
+        result.append({
+            "filename": f.name,
+            "size_kb": round(f.stat().st_size / 1024),
+            "active": f.name == active,
+        })
+    return result
+
+
+@router.post("/templates/upload")
+async def upload_template(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    if not (file.filename or "").lower().endswith(".pptx"):
+        raise HTTPException(400, "只支援 .pptx 檔案")
+    _TEMPLATES_DIR.mkdir(exist_ok=True)
+    safe_name = re.sub(r"[^\w\-.]", "_", file.filename or "upload.pptx")
+    dest = _TEMPLATES_DIR / safe_name
+    dest.write_bytes(await file.read())
+    return {"ok": True, "filename": safe_name}
+
+
+@router.put("/templates/{filename}/activate")
+async def activate_template(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+):
+    if not (_TEMPLATES_DIR / filename).exists():
+        raise HTTPException(404, "範本不存在")
+    _ACTIVE_CFG.write_text(filename)
+    return {"ok": True, "active": filename}
+
+
+@router.delete("/templates/{filename}")
+async def delete_template(
+    filename: str,
+    current_user: User = Depends(get_current_user),
+):
+    if filename == _DEFAULT_TPL:
+        raise HTTPException(400, "無法刪除預設範本")
+    path = _TEMPLATES_DIR / filename
+    if path.exists():
+        path.unlink()
+    # if deleted file was active, revert to default
+    if _ACTIVE_CFG.exists() and _ACTIVE_CFG.read_text().strip() == filename:
+        _ACTIVE_CFG.write_text(_DEFAULT_TPL)
+    return {"ok": True}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────

@@ -273,6 +273,18 @@ export const deleteProposal = (id: string) => api.delete(`/proposals/${id}`)
 export const exportProposalPptx = (id: string) =>
   api.get(`/proposals/${id}/export-pptx`, { responseType: 'blob' })
 
+// ── Proposal templates ────────────────────────────────────────────────────────
+export const listProposalTemplates = () => api.get('/proposals/templates')
+export const uploadProposalTemplate = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/proposals/templates/upload', form)
+}
+export const activateProposalTemplate = (filename: string) =>
+  api.put(`/proposals/templates/${encodeURIComponent(filename)}/activate`)
+export const deleteProposalTemplate = (filename: string) =>
+  api.delete(`/proposals/templates/${encodeURIComponent(filename)}`)
+
 // ── Round 4: 互動熱度 ──────────────────────────────────────────────────────────
 export const recalcEngagement = (leadId: string) =>
   api.post(`/leads/${leadId}/recalc_engagement`)
