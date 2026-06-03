@@ -354,10 +354,17 @@ async def generate_proposal(
             break
         except Exception as e:
             last_err = e
-            if attempt < 2 and ("429" in str(e) or "quota" in str(e).lower()):
-                await asyncio.sleep(22)  # wait past the 1-minute window then retry
+            err_str = str(e)
+            is_rate_limit = "429" in err_str or "quota" in err_str.lower()
+            if attempt < 2 and is_rate_limit:
+                # Parse suggested retry delay from the error message
+                import re as _re
+                m = _re.search(r'retry in\s+([\d.]+)\s*s', err_str, _re.IGNORECASE)
+                wait_sec = float(m.group(1)) + 5 if m else 35
+                wait_sec = min(wait_sec, 65)  # cap at 65s to avoid ridiculous waits
+                await asyncio.sleep(wait_sec)
                 continue
-            raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+            raise HTTPException(status_code=500, detail=f"AI 生成失敗：{err_str}")
     if data is None:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(last_err)}")
 
