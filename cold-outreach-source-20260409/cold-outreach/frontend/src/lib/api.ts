@@ -270,6 +270,8 @@ export const generateProposal = (data: {
 export const updateProposal = (id: string, data: Record<string, unknown>) =>
   api.patch(`/proposals/${id}`, data)
 export const deleteProposal = (id: string) => api.delete(`/proposals/${id}`)
+export const exportProposalPptx = (id: string) =>
+  api.get(`/proposals/${id}/export-pptx`, { responseType: 'blob' })
 
 // ── Round 4: 互動熱度 ──────────────────────────────────────────────────────────
 export const recalcEngagement = (leadId: string) =>

@@ -4,12 +4,14 @@ import json
 
 import google.generativeai as genai
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
 from models import Lead, Proposal, ProposalStatus, User
+from pptx_generator import generate_pptx
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -339,6 +341,32 @@ async def update_proposal(
     db.commit()
     db.refresh(proposal)
     return _serialize(proposal)
+
+
+@router.get("/{proposal_id}/export-pptx")
+async def export_proposal_pptx(
+    proposal_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """產生並下載提案 .pptx 檔案"""
+    proposal = db.query(Proposal).filter(Proposal.id == proposal_id).first()
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposal not found")
+
+    try:
+        buf = generate_pptx(_serialize(proposal))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PPT 產生失敗：{str(e)}")
+
+    safe_title = (proposal.title or "proposal").replace("/", "-").replace("\\", "-")[:60]
+    filename = f"{safe_title}.pptx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.delete("/{proposal_id}")

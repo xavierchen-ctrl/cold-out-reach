@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getProposals, generateProposal, deleteProposal, updateProposal, getLeads } from '@/lib/api'
+import { getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Plus, Trash2, Mail, ChevronDown, ChevronUp, Copy, CheckCheck,
-  Loader2, FileText, BarChart3, Lightbulb, DollarSign, Building2
+  Loader2, FileText, BarChart3, Lightbulb, DollarSign, Building2, Download
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -490,6 +490,26 @@ function ProposalDetailModal({
 }) {
   const [openPhases, setOpenPhases] = useState<Set<number>>(new Set([0]))
   const [copied, setCopied] = useState<'subject' | 'body' | null>(null)
+  const [downloading, setDownloading] = useState(false)
+
+  const handleDownloadPptx = async () => {
+    setDownloading(true)
+    try {
+      const res = await exportProposalPptx(proposal.id)
+      const url = URL.createObjectURL(new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${proposal.title || 'proposal'}.pptx`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('PPT 下載失敗，請稍後再試')
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   const togglePhase = (i: number) => {
     setOpenPhases(prev => {
@@ -541,6 +561,18 @@ function ProposalDetailModal({
             <span className="bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded-full">{proposal.budget_range}</span>
           )}
           <div className="ml-auto flex gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-6 text-xs gap-1"
+              onClick={handleDownloadPptx}
+              disabled={downloading}
+            >
+              {downloading
+                ? <Loader2 className="w-3 h-3 animate-spin" />
+                : <Download className="w-3 h-3" />}
+              下載 PPT
+            </Button>
             {proposal.status === 'draft' && (
               <Button
                 size="sm"
