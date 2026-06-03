@@ -331,7 +331,7 @@ async def generate_proposal(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash-8b")
+        model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(prompt)
         data = _parse_gemini_response(response.text)
     except Exception as e:
