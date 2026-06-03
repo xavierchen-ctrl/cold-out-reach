@@ -69,19 +69,24 @@ def _box(slide, l, t, w, h, *,
          align: PP_ALIGN = PP_ALIGN.LEFT,
          ml: float = 0.12,          # left/right inner margin in inches
          mt: float = 0.06):         # top/bottom inner margin in inches
-    shp = slide.shapes.add_textbox(l, t, w, h)
+    # Use rectangle shape (not textbox) so size is always fixed.
+    # add_textbox defaults to spAutoFit which expands the shape; add_shape(1) does not.
+    shp = slide.shapes.add_shape(1, l, t, w, h)
+    if fill:
+        shp.fill.solid()
+        shp.fill.fore_color.rgb = fill
+        # Shrink text to fit the fixed card boundary
+        shp.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    else:
+        shp.fill.background()
+        shp.text_frame.auto_size = MSO_AUTO_SIZE.NONE
+    shp.line.fill.background()
     tf = shp.text_frame
     tf.word_wrap = True
     tf.margin_left  = Inches(ml)
     tf.margin_right = Inches(ml)
     tf.margin_top   = Inches(mt)
     tf.margin_bottom = Inches(mt)
-    if fill:
-        shp.fill.solid()
-        shp.fill.fore_color.rgb = fill
-    else:
-        shp.fill.background()
-    shp.line.fill.background()
     if text:
         p = tf.paragraphs[0]
         p.alignment = align
