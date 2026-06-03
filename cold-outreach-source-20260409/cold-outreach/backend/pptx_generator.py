@@ -12,10 +12,12 @@ Template design language (reverse-engineered from real PPTX):
   - Layout        : number badge top-left + title, white bg
 """
 import os
+import copy
 import json
 from io import BytesIO
 from datetime import datetime
 
+from lxml import etree as _et
 from pptx import Presentation
 from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
@@ -227,11 +229,82 @@ def _delete_slides_from(prs: Presentation, keep_count: int):
         del sldIdLst[idx]
 
 
-def _add_slide(prs: Presentation):
+def _add_slide(prs: Presentation, ref_slide=None):
+    if ref_slide is not None:
+        return _copy_slide(prs, ref_slide)
     for layout in prs.slide_layouts:
         if "blank" in layout.name.lower():
             return prs.slides.add_slide(layout)
     return prs.slides.add_slide(prs.slide_layouts[0])
+
+
+def _copy_slide(dest_prs: Presentation, src_slide):
+    """
+    Copy visual-only (non-text) elements from src_slide into a new slide in dest_prs.
+    Shapes that contain text are skipped so the caller can layer fresh AI content on top.
+    Image relationships are remapped where possible.
+    """
+    layout = dest_prs.slide_layouts[-1]
+    for lay in dest_prs.slide_layouts:
+        if "blank" in lay.name.lower():
+            layout = lay
+            break
+    new_slide = dest_prs.slides.add_slide(layout)
+
+    # Copy slide background fill
+    try:
+        src_bg = src_slide.background._element
+        dst_bg = new_slide.background._element
+        for child in list(dst_bg):
+            dst_bg.remove(child)
+        for child in list(src_bg):
+            dst_bg.append(copy.deepcopy(child))
+    except Exception:
+        pass
+
+    # Copy only shapes that have no text content (decorative/structural shapes)
+    NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    src_tree = src_slide.shapes._spTree
+    dst_tree = new_slide.shapes._spTree
+    while len(dst_tree) > 2:
+        dst_tree.remove(dst_tree[-1])
+
+    for elem in list(src_tree)[2:]:
+        has_text = any(
+            (t.text or "").strip()
+            for t in elem.iter(f"{{{NS_A}}}t")
+        )
+        if has_text:
+            continue  # caller adds fresh content; skip original text shapes
+        dst_tree.append(copy.deepcopy(elem))
+
+    # Remap image/media relationship IDs
+    try:
+        rId_map = {}
+        for rId, rel in src_slide.part.rels.items():
+            try:
+                if rel.is_external:
+                    new_rId = new_slide.part.relate_to(
+                        rel.target_ref, rel.reltype, is_external=True)
+                else:
+                    new_rId = new_slide.part.relate_to(rel.target_part, rel.reltype)
+                if new_rId != rId:
+                    rId_map[rId] = new_rId
+            except Exception:
+                pass
+        if rId_map:
+            xml_str = _et.tostring(dst_tree).decode("utf-8")
+            for old_id, new_id in rId_map.items():
+                xml_str = xml_str.replace(f'"{old_id}"', f'"{new_id}"')
+            new_tree = _et.fromstring(xml_str.encode("utf-8"))
+            while len(dst_tree):
+                dst_tree.remove(dst_tree[-1])
+            for child in new_tree:
+                dst_tree.append(child)
+    except Exception:
+        pass
+
+    return new_slide
 
 
 # ─────────────────────────── Cover update ─────────────────────────────────────
@@ -276,10 +349,11 @@ def _slide_section(prs, section_num: str, title: str, accent: RGBColor = NAVY):
 
 # ─────────────────────────── Phase 2 slides ───────────────────────────────────
 
-def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase2a(prs, p2: dict, phase_num: str = "01", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     _page_header(slide, phase_num, "全漏斗策略規劃 — 現況診斷與方向")
     _footer(slide)
@@ -314,10 +388,11 @@ def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
              size=9, bold=True, color=NAVY, ml=0.1, mt=0.08)
 
 
-def _slide_phase2b(prs, p2: dict, phase_num: str = "02"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase2b(prs, p2: dict, phase_num: str = "02", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     _page_header(slide, phase_num, "四階段全漏斗媒體規劃")
     _footer(slide)
@@ -360,10 +435,11 @@ def _slide_phase2b(prs, p2: dict, phase_num: str = "02"):
 
 # ─────────────────────────── Phase 3 ──────────────────────────────────────────
 
-def _slide_phase3(prs, p3: dict, phase_num: str = "03"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase3(prs, p3: dict, phase_num: str = "03", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     _page_header(slide, phase_num, "市場數據洞察", TEAL, TEAL)
     _footer(slide)
@@ -407,10 +483,11 @@ def _slide_phase3(prs, p3: dict, phase_num: str = "03"):
 
 # ─────────────────────────── Phase 4 ──────────────────────────────────────────
 
-def _slide_phase4(prs, p4: dict, phase_num: str = "04"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase4(prs, p4: dict, phase_num: str = "04", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     PURPLE = RGBColor(0x5C, 0x35, 0xA8)
     L_PURP = RGBColor(0xEF, 0xEC, 0xF9)
@@ -466,10 +543,11 @@ def _slide_phase4(prs, p4: dict, phase_num: str = "04"):
 
 # ─────────────────────────── Phase 5 slides ───────────────────────────────────
 
-def _slide_phase5a(prs, p5: dict, phase_num: str = "05"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase5a(prs, p5: dict, phase_num: str = "05", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     _page_header(slide, phase_num, "媒體預算配置", ORANGE, ORANGE)
     _footer(slide)
@@ -525,10 +603,11 @@ def _slide_phase5a(prs, p5: dict, phase_num: str = "05"):
         ty += row_h
 
 
-def _slide_phase5b(prs, p5: dict, phase_num: str = "06"):
-    slide = _add_slide(prs)
-    slide.background.fill.solid()
-    slide.background.fill.fore_color.rgb = WHITE
+def _slide_phase5b(prs, p5: dict, phase_num: str = "06", ref_slide=None):
+    slide = _add_slide(prs, ref_slide=ref_slide)
+    if ref_slide is None:
+        slide.background.fill.solid()
+        slide.background.fill.fore_color.rgb = WHITE
 
     _page_header(slide, phase_num, "關鍵節點與執行時程", ORANGE, ORANGE)
     _footer(slide)
@@ -596,6 +675,20 @@ def generate_pptx(proposal: dict) -> BytesIO:
     if tokens.get("secondary"): TEAL   = _hex(tokens["secondary"])
     if tokens.get("font"):      FONT   = tokens["font"]
 
+    # Load reference content slides (11+) from the activated design reference file
+    ref_slides = []
+    if tokens.get("source"):
+        ref_path = os.path.join(_TEMPLATES_DIR, tokens["source"])
+        if os.path.exists(ref_path):
+            try:
+                ref_prs = Presentation(ref_path)
+                ref_slides = list(ref_prs.slides)[10:]  # slides 11+ are content slides
+            except Exception:
+                pass
+
+    def _ref(i):
+        return ref_slides[i % len(ref_slides)] if ref_slides else None
+
     try:
         prs = Presentation(_BASE_TEMPLATE)
         _update_cover(prs.slides[0], proposal)
@@ -608,15 +701,15 @@ def generate_pptx(proposal: dict) -> BytesIO:
         p5 = content.get("phase5") or {}
 
         _slide_section(prs, "01", "數位行銷策略提案", NAVY)
-        _slide_phase2a(prs, p2, "01")
-        _slide_phase2b(prs, p2, "02")
+        _slide_phase2a(prs, p2, "01", ref_slide=_ref(0))
+        _slide_phase2b(prs, p2, "02", ref_slide=_ref(1))
         _slide_section(prs, "02", "市場數據洞察", TEAL)
-        _slide_phase3(prs, p3, "03")
+        _slide_phase3(prs, p3, "03", ref_slide=_ref(2))
         _slide_section(prs, "03", "廣告創意策略", RGBColor(0x5C, 0x35, 0xA8))
-        _slide_phase4(prs, p4, "04")
+        _slide_phase4(prs, p4, "04", ref_slide=_ref(3))
         _slide_section(prs, "04", "媒體預算規劃", ORANGE)
-        _slide_phase5a(prs, p5, "05")
-        _slide_phase5b(prs, p5, "06")
+        _slide_phase5a(prs, p5, "05", ref_slide=_ref(4))
+        _slide_phase5b(prs, p5, "06", ref_slide=_ref(5))
 
         buf = BytesIO()
         prs.save(buf)
