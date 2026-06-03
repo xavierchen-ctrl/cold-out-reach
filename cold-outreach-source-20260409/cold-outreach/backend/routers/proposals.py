@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from auth import get_current_user
 from database import get_db
 from models import Lead, Proposal, ProposalStatus, User
-from pptx_generator import generate_pptx
+from pptx_generator import generate_pptx, extract_design_tokens
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -280,8 +280,12 @@ async def activate_template(
     path = _TEMPLATES_DIR / filename
     if not path.exists():
         raise HTTPException(404, "範本不存在")
-    from pptx_generator import extract_design_tokens
-    tokens = extract_design_tokens(str(path))
+    try:
+        tokens = extract_design_tokens(str(path))
+    except Exception as e:
+        raise HTTPException(500, f"無法解析檔案: {e}")
+    # Always store source so generate_pptx can find the reference slides
+    tokens["source"] = filename
     _TEMPLATES_DIR.mkdir(exist_ok=True)
     _DESIGN_TOKENS.write_text(json.dumps(tokens, ensure_ascii=False))
     return {"ok": True, "tokens": tokens}

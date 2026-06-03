@@ -43,46 +43,43 @@ def _load_design_tokens() -> dict:
 def extract_design_tokens(pptx_path: str) -> dict:
     """
     Scan content slides (11+) of a reference PPTX for dominant colors/font.
-    Returns { "primary", "accent", "secondary", "font", "source" }.
+    Returns at least {"source": basename}.  Never raises.
     """
     from collections import Counter
+    tokens: dict = {"source": os.path.basename(pptx_path)}
     try:
         prs = Presentation(pptx_path)
-    except Exception:
-        return {}
+        color_counts: Counter = Counter()
+        font_counts:  Counter = Counter()
+        start = min(10, len(prs.slides))
 
-    color_counts: Counter = Counter()
-    font_counts:  Counter = Counter()
-    start = min(10, len(prs.slides))
-
-    for slide in prs.slides[start:]:
-        for shape in slide.shapes:
-            try:
-                rgb = shape.fill.fore_color.rgb
-                r, g, b = rgb[0], rgb[1], rgb[2]
-                # Skip near-white and near-black
-                if not (r > 230 and g > 230 and b > 230) and \
-                   not (r < 30  and g < 30  and b < 30):
-                    color_counts[f"#{r:02X}{g:02X}{b:02X}"] += 1
-            except Exception:
-                pass
-            if hasattr(shape, "text_frame"):
+        for slide in prs.slides[start:]:
+            for shape in slide.shapes:
                 try:
-                    for para in shape.text_frame.paragraphs:
-                        for run in para.runs:
-                            if run.font.name:
-                                font_counts[run.font.name] += 1
+                    rgb = shape.fill.fore_color.rgb
+                    r, g, b = rgb[0], rgb[1], rgb[2]
+                    if not (r > 230 and g > 230 and b > 230) and \
+                       not (r < 30  and g < 30  and b < 30):
+                        color_counts[f"#{r:02X}{g:02X}{b:02X}"] += 1
                 except Exception:
                     pass
+                if hasattr(shape, "text_frame"):
+                    try:
+                        for para in shape.text_frame.paragraphs:
+                            for run in para.runs:
+                                if run.font.name:
+                                    font_counts[run.font.name] += 1
+                    except Exception:
+                        pass
 
-    top_colors = [c for c, _ in color_counts.most_common(5)]
-    top_font   = font_counts.most_common(1)[0][0] if font_counts else None
-    tokens: dict = {}
-    if len(top_colors) > 0: tokens["primary"]   = top_colors[0]
-    if len(top_colors) > 1: tokens["accent"]    = top_colors[1]
-    if len(top_colors) > 2: tokens["secondary"] = top_colors[2]
-    if top_font:             tokens["font"]      = top_font
-    tokens["source"] = os.path.basename(pptx_path)
+        top_colors = [c for c, _ in color_counts.most_common(5)]
+        top_font   = font_counts.most_common(1)[0][0] if font_counts else None
+        if len(top_colors) > 0: tokens["primary"]   = top_colors[0]
+        if len(top_colors) > 1: tokens["accent"]    = top_colors[1]
+        if len(top_colors) > 2: tokens["secondary"] = top_colors[2]
+        if top_font:             tokens["font"]      = top_font
+    except Exception:
+        pass
     return tokens
 
 # ── Slide geometry matching actual Wavenet template (10 × 5.625 in) ──────────
