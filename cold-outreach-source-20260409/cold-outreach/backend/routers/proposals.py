@@ -329,13 +329,24 @@ async def generate_proposal(
 
     prompt = _build_prompt(lead, body.product_focus, body.budget_range, body.extra_context)
 
-    try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
-        data = _parse_gemini_response(response.text)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+    import asyncio
+    genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    data = None
+    last_err = None
+    for attempt in range(3):
+        try:
+            response = model.generate_content(prompt)
+            data = _parse_gemini_response(response.text)
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < 2 and ("429" in str(e) or "quota" in str(e).lower()):
+                await asyncio.sleep(22)  # wait past the 1-minute window then retry
+                continue
+            raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+    if data is None:
+        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(last_err)}")
 
     content = {
         "phase1": WAVENET_PHASE1,
