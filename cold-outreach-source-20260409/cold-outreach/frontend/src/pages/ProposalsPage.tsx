@@ -652,8 +652,9 @@ function ProposalDetailModal({
       a.download = `${proposal.title || 'proposal'}.pptx`
       a.click()
       URL.revokeObjectURL(url)
-    } catch {
-      alert('PPT 下載失敗，請稍後再試')
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知錯誤'
+      alert(`PPT 下載失敗：${detail}`)
     } finally {
       setDownloading(false)
     }

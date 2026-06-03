@@ -23,10 +23,13 @@ from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
+# User-upload directory (configurable for Railway Volume persistence).
 _TEMPLATES_DIR  = os.getenv("TEMPLATES_DIR", os.path.join(os.path.dirname(__file__), "templates"))
-# The Wavenet company-intro base is ALWAYS used — never replaced by uploads.
-_BASE_TEMPLATE  = os.path.join(_TEMPLATES_DIR, "wavenet_template.pptx")
-# Design tokens extracted from reference uploads.
+# The Wavenet company-intro base is ALWAYS loaded from the bundled repo path,
+# so it works even when TEMPLATES_DIR points to an empty/new Railway Volume.
+_BUNDLED_DIR    = os.path.join(os.path.dirname(__file__), "templates")
+_BASE_TEMPLATE  = os.path.join(_BUNDLED_DIR, "wavenet_template.pptx")
+# Design tokens extracted from reference uploads (lives on the volume).
 _DESIGN_TOKENS  = os.path.join(_TEMPLATES_DIR, "design_tokens.json")
 
 
@@ -702,6 +705,12 @@ def generate_pptx(proposal: dict) -> BytesIO:
 
     def _ref(i):
         return ref_slides[i % len(ref_slides)] if ref_slides else None
+
+    if not os.path.exists(_BASE_TEMPLATE):
+        raise FileNotFoundError(
+            f"找不到基礎模板：{_BASE_TEMPLATE}。"
+            "請確認 wavenet_template.pptx 已存在於 backend/templates/ 目錄中。"
+        )
 
     try:
         prs = Presentation(_BASE_TEMPLATE)
