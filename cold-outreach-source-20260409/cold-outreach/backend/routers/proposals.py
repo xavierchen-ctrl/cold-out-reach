@@ -4,7 +4,7 @@ import json
 
 import google.generativeai as genai
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -362,8 +362,8 @@ async def export_proposal_pptx(
     safe_title = (proposal.title or "proposal").replace("/", "-").replace("\\", "-")[:60]
     filename = f"{safe_title}.pptx"
 
-    return StreamingResponse(
-        buf,
+    return Response(
+        content=buf.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
