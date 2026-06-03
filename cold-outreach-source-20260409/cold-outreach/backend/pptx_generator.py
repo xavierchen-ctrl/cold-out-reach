@@ -17,7 +17,7 @@ from datetime import datetime
 from pptx import Presentation
 from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "wavenet_template.pptx")
 
@@ -253,6 +253,8 @@ def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
     _box(slide, ML, ty, half_w, Inches(0.32),
          text="客戶現況診斷", size=10, bold=True, color=WHITE, ml=0.1, mt=0.06)
     _, tf = _box(slide, ML, ty + Inches(0.32), half_w, Inches(1.95), fill=L_NAVY)
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.word_wrap = True
     _para(tf, diag, size=10, color=DARK)
 
     # Right: Strategy
@@ -261,6 +263,8 @@ def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
     _box(slide, rx, ty, half_w, Inches(0.32),
          text="策略方向建議", size=10, bold=True, color=WHITE, ml=0.1, mt=0.06)
     _, tf = _box(slide, rx, ty + Inches(0.32), half_w, Inches(1.95), fill=L_ORNG)
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.word_wrap = True
     _para(tf, approach, size=10, color=DARK)
 
     # Key insight bar
@@ -291,22 +295,26 @@ def _slide_phase2b(prs, p2: dict, phase_num: str = "02"):
     ]
 
     col_w = (UW - Inches(0.45)) / 4
-    max_cont_h = SH - CONT_T - Inches(0.35)   # stays within slide
+    # Card bottom fixed at SH - 0.55in to stay clear of footer
+    card_bottom = SH - Inches(0.55)
+    hdr_h = Inches(0.38)
+    cont_t = CONT_T + hdr_h
+    cont_h = card_bottom - cont_t   # height of the content area inside each card
 
     for i, stage in enumerate(funnel[:4]):
         lx  = ML + i * (col_w + Inches(0.15))
         fg, bg = palette[i % 4]
 
         # Stage header bar
-        _rect(slide, lx, CONT_T, col_w, Inches(0.38), fg)
-        _box(slide, lx, CONT_T, col_w, Inches(0.38),
+        _rect(slide, lx, CONT_T, col_w, hdr_h, fg)
+        _box(slide, lx, CONT_T, col_w, hdr_h,
              text=_trunc(stage.get("stage", f"Phase {i+1}"), 8),
              size=11, bold=True, color=WHITE, align=PP_ALIGN.CENTER, ml=0.04, mt=0.06)
 
-        # Content box
-        cont_t = CONT_T + Inches(0.38)
-        cont_h = max_cont_h - Inches(0.38)
+        # Content box — TEXT_TO_FIT_SHAPE keeps text inside the card
         _, tf = _box(slide, lx, cont_t, col_w, cont_h, fill=bg, ml=0.08, mt=0.08)
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        tf.word_wrap = True
 
         _para(tf, "目標", size=8, bold=True, color=fg)
         _para(tf, _trunc(stage.get("objective", ""), 48), size=9, color=DARK)
@@ -351,13 +359,18 @@ def _slide_phase3(prs, p3: dict, phase_num: str = "03"):
 
     gap_text = _trunc(p3.get("competitive_gap", ""), 90)
     _section_label(slide, "競爭差距分析", ML, ty2, TEAL)
-    _, tf = _box(slide, ML, ty2 + Inches(0.24), half_w, Inches(1.6), fill=L_TEAL, ml=0.1, mt=0.1)
+    box_h = SH - (ty2 + Inches(0.24)) - Inches(0.55)
+    _, tf = _box(slide, ML, ty2 + Inches(0.24), half_w, box_h, fill=L_TEAL, ml=0.1, mt=0.1)
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.word_wrap = True
     _para(tf, gap_text, size=9, color=DARK)
 
     opps = p3.get("growth_opportunities", [])
     rx = ML + half_w + Inches(0.2)
     _section_label(slide, "成長機會", rx, ty2, ORANGE)
-    _, tf = _box(slide, rx, ty2 + Inches(0.24), half_w, Inches(1.6), fill=L_ORNG, ml=0.1, mt=0.1)
+    _, tf = _box(slide, rx, ty2 + Inches(0.24), half_w, box_h, fill=L_ORNG, ml=0.1, mt=0.1)
+    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+    tf.word_wrap = True
     for opp in opps[:4]:
         _para(tf, f"- {_trunc(opp, 35)}", size=9, color=DARK)
 
@@ -398,7 +411,11 @@ def _slide_phase4(prs, p4: dict, phase_num: str = "04"):
     ]
     col_w = (UW - Inches(0.3)) / 3
     ty2   = CONT_T + Inches(0.78)
-    max_cont_h = SH - ty2 - Inches(0.35)
+    # Card bottom fixed to stay clear of footer
+    card_bottom = SH - Inches(0.55)
+    hdr_h4 = Inches(0.35)
+    body_t = ty2 + hdr_h4
+    body_h = card_bottom - body_t
 
     for i, (key, default_name, fg, bg) in enumerate(dim_data):
         lx = ML + i * (col_w + Inches(0.15))
@@ -407,13 +424,14 @@ def _slide_phase4(prs, p4: dict, phase_num: str = "04"):
         desc = _trunc(dim.get("description", ""), 75)
         examples = dim.get("examples", [])
 
-        _rect(slide, lx, ty2, col_w, Inches(0.35), fg)
-        _box(slide, lx, ty2, col_w, Inches(0.35),
+        _rect(slide, lx, ty2, col_w, hdr_h4, fg)
+        _box(slide, lx, ty2, col_w, hdr_h4,
              text=name, size=11, bold=True, color=WHITE,
              align=PP_ALIGN.CENTER, ml=0.05, mt=0.06)
 
-        body_h = max_cont_h - Inches(0.35)
-        _, tf = _box(slide, lx, ty2 + Inches(0.35), col_w, body_h, fill=bg, ml=0.1, mt=0.08)
+        _, tf = _box(slide, lx, body_t, col_w, body_h, fill=bg, ml=0.1, mt=0.08)
+        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
+        tf.word_wrap = True
         _para(tf, desc, size=9, color=DARK)
         if examples:
             _para(tf, "素材範例", size=7, bold=True, color=fg, space_before=4)
