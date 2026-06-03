@@ -261,14 +261,22 @@ async def upload_template(
     if not is_pptx_mime and not is_pptx_ext:
         raise HTTPException(400, "只支援 .pptx 檔案")
 
-    _TEMPLATES_DIR.mkdir(exist_ok=True)
+    try:
+        _TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        raise HTTPException(500, f"無法建立目錄 {_TEMPLATES_DIR}: {e}")
 
     # Build a safe filename; keep CJK chars (they ARE \w in Python 3)
     base = re.sub(r"[^\w\-.]", "_", fname) if fname else "upload"
     if not base.lower().endswith(".pptx"):
         base = base + ".pptx"
     dest = _TEMPLATES_DIR / base
-    dest.write_bytes(await file.read())
+    try:
+        import shutil
+        with dest.open("wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        raise HTTPException(500, f"無法儲存檔案: {e}")
     return {"ok": True, "filename": base}
 
 

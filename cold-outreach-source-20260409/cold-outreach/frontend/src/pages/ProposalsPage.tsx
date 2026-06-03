@@ -155,8 +155,9 @@ function TemplateManager() {
     try {
       await uploadProposalTemplate(file)
       await load()
-    } catch {
-      alert('上傳失敗，請確認是 .pptx 格式')
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || '未知錯誤'
+      alert(`上傳失敗：${detail}`)
     } finally {
       setUploading(false)
       e.target.value = ''
