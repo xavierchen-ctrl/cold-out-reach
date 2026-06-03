@@ -7,7 +7,8 @@ Template design language (reverse-engineered from real PPTX):
   - Primary navy  : #002338
   - Accent orange : #ED7D31
   - Teal          : #0097A7
-  - Font          : Microsoft YaHei (YaHei used in template)
+  - Font          : Microsoft YaHei
+  - Slide size    : 9144000 × 5143500 EMU (10 × 5.625 in)
   - Layout        : number badge top-left + title, white bg
 """
 import os
@@ -21,38 +22,36 @@ from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "wavenet_template.pptx")
 
-# ── Slide geometry (12192000 × 6858000 EMU = 13.33 × 7.5 in) ─────────────────
-SW   = Emu(12192000)
-SH   = Emu(6858000)
-ML   = Inches(0.35)          # left margin
-MR   = Inches(0.35)          # right margin
-UW   = SW - ML - MR          # usable width  ≈ 12.63 in
+# ── Slide geometry matching actual Wavenet template (10 × 5.625 in) ──────────
+SW   = Emu(9144000)    # 10 in
+SH   = Emu(5143500)    # 5.625 in
+ML   = Inches(0.3)     # left margin
+MR   = Inches(0.3)     # right margin
+UW   = SW - ML - MR   # usable width = 9.4 in
 
-# ── Wavenet brand palette (from template analysis) ────────────────────────────
-NAVY    = RGBColor(0x00, 0x23, 0x38)   # #002338 – primary
-ORANGE  = RGBColor(0xED, 0x7D, 0x31)   # #ED7D31 – accent
-TEAL    = RGBColor(0x00, 0x97, 0xA7)   # #0097A7 – teal
+# ── Wavenet brand palette ─────────────────────────────────────────────────────
+NAVY    = RGBColor(0x00, 0x23, 0x38)
+ORANGE  = RGBColor(0xED, 0x7D, 0x31)
+TEAL    = RGBColor(0x00, 0x97, 0xA7)
 WHITE   = RGBColor(0xFF, 0xFF, 0xFF)
-DARK    = RGBColor(0x21, 0x21, 0x21)   # #212121
+DARK    = RGBColor(0x21, 0x21, 0x21)
 GRAY    = RGBColor(0x75, 0x75, 0x75)
-L_NAVY  = RGBColor(0xE3, 0xE8, 0xEC)   # light navy bg
-L_ORNG  = RGBColor(0xFD, 0xEF, 0xE4)   # light orange bg
-L_TEAL  = RGBColor(0xE0, 0xF5, 0xF7)   # light teal bg
-L_GRAY  = RGBColor(0xF5, 0xF5, 0xF5)   # very light gray bg
+L_NAVY  = RGBColor(0xE3, 0xE8, 0xEC)
+L_ORNG  = RGBColor(0xFD, 0xEF, 0xE4)
+L_TEAL  = RGBColor(0xE0, 0xF5, 0xF7)
+L_GRAY  = RGBColor(0xF5, 0xF5, 0xF5)
 MIDGRAY = RGBColor(0xE0, 0xE0, 0xE0)
 
 FONT = "Microsoft YaHei"
 
-# ── Slide key y-positions ──────────────────────────────────────────────────────
-HDR_H   = Inches(1.05)         # header area height (number + title)
-CONT_T  = Inches(1.15)         # content area top
-CONT_H  = SH - CONT_T - Inches(0.25)  # max content height (≈6.1 in)
+# ── Key y-positions (all proportioned for 5.625" height) ─────────────────────
+CONT_T = Inches(0.78)                      # content area top (below header+underline)
+CARD_B = SH - Inches(0.35)                 # max card bottom (above footer)
 
 
 # ─────────────────────────── Low-level helpers ────────────────────────────────
 
 def _rect(slide, l, t, w, h, color: RGBColor):
-    """Add a solid-filled rectangle with no border."""
     shp = slide.shapes.add_shape(1, l, t, w, h)
     shp.fill.solid()
     shp.fill.fore_color.rgb = color
@@ -63,19 +62,16 @@ def _rect(slide, l, t, w, h, color: RGBColor):
 def _box(slide, l, t, w, h, *,
          fill: RGBColor = None,
          text: str = "",
-         size: int = 11,
+         size: int = 10,
          bold: bool = False,
          color: RGBColor = None,
          align: PP_ALIGN = PP_ALIGN.LEFT,
-         ml: float = 0.12,          # left/right inner margin in inches
-         mt: float = 0.06):         # top/bottom inner margin in inches
-    # Use rectangle shape (not textbox) so size is always fixed.
-    # add_textbox defaults to spAutoFit which expands the shape; add_shape(1) does not.
+         ml: float = 0.1,
+         mt: float = 0.05):
     shp = slide.shapes.add_shape(1, l, t, w, h)
     if fill:
         shp.fill.solid()
         shp.fill.fore_color.rgb = fill
-        # Shrink text to fit the fixed card boundary
         shp.text_frame.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
     else:
         shp.fill.background()
@@ -83,11 +79,10 @@ def _box(slide, l, t, w, h, *,
     shp.line.fill.background()
     tf = shp.text_frame
     tf.word_wrap = True
-    tf.margin_left  = Inches(ml)
-    tf.margin_right = Inches(ml)
-    tf.margin_top   = Inches(mt)
+    tf.margin_left   = Inches(ml)
+    tf.margin_right  = Inches(ml)
+    tf.margin_top    = Inches(mt)
     tf.margin_bottom = Inches(mt)
-    # add_shape defaults to center vertical anchor; force top so text starts at card top
     tf._txBody.bodyPr.set('anchor', 't')
     if text:
         p = tf.paragraphs[0]
@@ -102,7 +97,7 @@ def _box(slide, l, t, w, h, *,
 
 
 def _para(tf, text: str, *,
-          size: int = 10,
+          size: int = 9,
           bold: bool = False,
           color: RGBColor = None,
           align: PP_ALIGN = PP_ALIGN.LEFT,
@@ -135,40 +130,30 @@ def _trunc(s, n):
 def _page_header(slide, number: str, title: str,
                  number_bg: RGBColor = NAVY,
                  title_color: RGBColor = NAVY):
-    """
-    Mimics the template's top-left number badge + title pattern.
-    Slides 11, 13, etc. use this exact layout.
-    """
-    # Top-left number badge
-    badge_w, badge_h = Inches(0.55), Inches(0.55)
-    _rect(slide, ML, Inches(0.25), badge_w, badge_h, number_bg)
-    _box(slide, ML, Inches(0.25), badge_w, badge_h,
-         text=number, size=16, bold=True, color=WHITE,
-         align=PP_ALIGN.CENTER, ml=0, mt=0.05)
-
-    # Title text
-    _box(slide, ML + badge_w + Inches(0.12), Inches(0.25),
-         UW - badge_w - Inches(0.12), badge_h,
-         text=title, size=18, bold=True, color=title_color, ml=0.05, mt=0.06)
-
-    # Thin orange underline beneath header area
-    _rect(slide, ML, Inches(0.85), UW, Inches(0.04), ORANGE)
+    badge_w = badge_h = Inches(0.42)
+    badge_y = Inches(0.15)
+    _rect(slide, ML, badge_y, badge_w, badge_h, number_bg)
+    _box(slide, ML, badge_y, badge_w, badge_h,
+         text=number, size=14, bold=True, color=WHITE,
+         align=PP_ALIGN.CENTER, ml=0, mt=0.04)
+    _box(slide, ML + badge_w + Inches(0.1), badge_y,
+         UW - badge_w - Inches(0.1), badge_h,
+         text=title, size=15, bold=True, color=title_color, ml=0.05, mt=0.05)
+    _rect(slide, ML, Inches(0.62), UW, Inches(0.025), ORANGE)
 
 
 def _footer(slide):
-    """Small footer bar matching template style."""
-    _box(slide, ML, SH - Inches(0.28), UW, Inches(0.24),
+    _box(slide, ML, SH - Inches(0.22), UW, Inches(0.20),
          text="潮網科技 Wavenet Technology  ·  Digital Marketing Proposal",
-         size=8, color=GRAY, align=PP_ALIGN.RIGHT, ml=0, mt=0.03)
+         size=7, color=GRAY, align=PP_ALIGN.RIGHT, ml=0, mt=0.03)
 
 
 def _section_label(slide, text: str, l, t, color: RGBColor = NAVY):
-    """Small uppercase category label above a content block."""
-    _box(slide, l, t, UW, Inches(0.22),
+    _box(slide, l, t, UW, Inches(0.18),
          text=text.upper(), size=7, bold=True, color=color, ml=0, mt=0)
 
 
-# ─────────────────────────── Slide deletion helper ────────────────────────────
+# ─────────────────────────── Slide helpers ────────────────────────────────────
 
 def _delete_slides_from(prs: Presentation, keep_count: int):
     sldIdLst = prs.slides._sldIdLst
@@ -210,37 +195,27 @@ def _update_cover(slide, proposal: dict):
                         run.text = run.text.replace(old, new)
 
 
-# ─────────────────────────── Section divider slide ────────────────────────────
+# ─────────────────────────── Section divider ──────────────────────────────────
 
 def _slide_section(prs, section_num: str, title: str, accent: RGBColor = NAVY):
     slide = _add_slide(prs)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = WHITE
 
-    # Left accent strip matching template sidebar style
-    _rect(slide, Inches(0), Inches(0), Inches(0.18), SH, accent)
-
-    # Large section number — matches template's big number style
-    _box(slide, Inches(0.3), Inches(1.5), Inches(1.5), Inches(1.5),
-         text=section_num, size=72, bold=True, color=accent, ml=0, mt=0)
-
-    # Section title
-    _box(slide, Inches(0.3), Inches(3.2), UW - Inches(0.3), Inches(1.0),
-         text=title, size=28, bold=True, color=DARK, ml=0, mt=0)
-
-    # Accent underline
-    _rect(slide, Inches(0.3), Inches(4.3), Inches(2.5), Inches(0.07), accent)
-
-    # Wavenet branding bottom right
-    _box(slide, ML, SH - Inches(0.45), UW, Inches(0.35),
+    _rect(slide, Inches(0), Inches(0), Inches(0.14), SH, accent)
+    _box(slide, Inches(0.24), Inches(0.75), Inches(1.0), Inches(0.9),
+         text=section_num, size=52, bold=True, color=accent, ml=0, mt=0)
+    _box(slide, Inches(0.24), Inches(1.75), UW - Inches(0.24), Inches(0.55),
+         text=title, size=22, bold=True, color=DARK, ml=0, mt=0)
+    _rect(slide, Inches(0.24), Inches(2.36), Inches(1.5), Inches(0.045), accent)
+    _box(slide, ML, SH - Inches(0.28), UW, Inches(0.24),
          text="潮網科技 Wavenet Technology",
-         size=9, color=GRAY, align=PP_ALIGN.RIGHT, ml=0, mt=0)
+         size=8, color=GRAY, align=PP_ALIGN.RIGHT, ml=0, mt=0)
 
 
 # ─────────────────────────── Phase 2 slides ───────────────────────────────────
 
 def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
-    """Phase 2-a: Current diagnosis + strategy direction."""
     slide = _add_slide(prs)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = WHITE
@@ -248,44 +223,37 @@ def _slide_phase2a(prs, p2: dict, phase_num: str = "01"):
     _page_header(slide, phase_num, "全漏斗策略規劃 — 現況診斷與方向")
     _footer(slide)
 
-    diag     = _trunc(p2.get("current_diagnosis", ""), 95)
-    approach = _trunc(p2.get("recommended_approach", ""), 95)
-    insight  = _trunc(p2.get("key_insight", ""), 70)
+    diag     = _trunc(p2.get("current_diagnosis", ""), 120)
+    approach = _trunc(p2.get("recommended_approach", ""), 120)
+    insight  = _trunc(p2.get("key_insight", ""), 80)
 
-    half_w = (UW - Inches(0.2)) / 2
+    half_w = (UW - Inches(0.15)) / 2
     ty = CONT_T
 
-    # Left: Diagnosis
-    _rect(slide, ML, ty, half_w, Inches(0.32), NAVY)
-    _box(slide, ML, ty, half_w, Inches(0.32),
-         text="客戶現況診斷", size=10, bold=True, color=WHITE, ml=0.1, mt=0.06)
-    _, tf = _box(slide, ML, ty + Inches(0.32), half_w, Inches(1.95), fill=L_NAVY)
-    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    tf.word_wrap = True
-    _para(tf, diag, size=10, color=DARK)
+    _rect(slide, ML, ty, half_w, Inches(0.26), NAVY)
+    _box(slide, ML, ty, half_w, Inches(0.26),
+         text="客戶現況診斷", size=9, bold=True, color=WHITE, ml=0.1, mt=0.05)
+    box_h = CARD_B - (ty + Inches(0.26)) - (Inches(0.45) if insight else 0)
+    _, tf = _box(slide, ML, ty + Inches(0.26), half_w, box_h, fill=L_NAVY)
+    _para(tf, diag, size=9, color=DARK)
 
-    # Right: Strategy
-    rx = ML + half_w + Inches(0.2)
-    _rect(slide, rx, ty, half_w, Inches(0.32), ORANGE)
-    _box(slide, rx, ty, half_w, Inches(0.32),
-         text="策略方向建議", size=10, bold=True, color=WHITE, ml=0.1, mt=0.06)
-    _, tf = _box(slide, rx, ty + Inches(0.32), half_w, Inches(1.95), fill=L_ORNG)
-    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    tf.word_wrap = True
-    _para(tf, approach, size=10, color=DARK)
+    rx = ML + half_w + Inches(0.15)
+    _rect(slide, rx, ty, half_w, Inches(0.26), ORANGE)
+    _box(slide, rx, ty, half_w, Inches(0.26),
+         text="策略方向建議", size=9, bold=True, color=WHITE, ml=0.1, mt=0.05)
+    _, tf = _box(slide, rx, ty + Inches(0.26), half_w, box_h, fill=L_ORNG)
+    _para(tf, approach, size=9, color=DARK)
 
-    # Key insight bar
     if insight:
-        bar_t = ty + Inches(2.5)
-        _rect(slide, ML, bar_t, Inches(0.06), Inches(0.48), ORANGE)
-        _box(slide, ML + Inches(0.12), bar_t, UW - Inches(0.12), Inches(0.48),
+        bar_t = CARD_B - Inches(0.38)
+        _rect(slide, ML, bar_t, Inches(0.05), Inches(0.38), ORANGE)
+        _box(slide, ML + Inches(0.1), bar_t, UW - Inches(0.1), Inches(0.38),
              fill=L_ORNG,
              text=f"Key Insight  |  {insight}",
-             size=10, bold=True, color=NAVY, ml=0.12, mt=0.1)
+             size=9, bold=True, color=NAVY, ml=0.1, mt=0.08)
 
 
 def _slide_phase2b(prs, p2: dict, phase_num: str = "02"):
-    """Phase 2-b: 4-stage funnel cards."""
     slide = _add_slide(prs)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = WHITE
@@ -298,40 +266,35 @@ def _slide_phase2b(prs, p2: dict, phase_num: str = "02"):
         (NAVY,   L_NAVY),
         (TEAL,   L_TEAL),
         (ORANGE, L_ORNG),
-        (RGBColor(0x3C,0x5A,0xA0), RGBColor(0xE8,0xED,0xF7)),
+        (RGBColor(0x3C, 0x5A, 0xA0), RGBColor(0xE8, 0xED, 0xF7)),
     ]
 
-    col_w = (UW - Inches(0.45)) / 4
-    # Card bottom fixed at SH - 0.55in to stay clear of footer
-    card_bottom = SH - Inches(0.55)
-    hdr_h = Inches(0.38)
-    cont_t = CONT_T + hdr_h
-    cont_h = card_bottom - cont_t   # height of the content area inside each card
+    n_cols  = 4
+    gap     = Inches(0.1)
+    col_w   = (UW - gap * (n_cols - 1)) / n_cols
+    hdr_h   = Inches(0.28)
+    cont_t  = CONT_T + hdr_h
+    cont_h  = CARD_B - cont_t
 
     for i, stage in enumerate(funnel[:4]):
-        lx  = ML + i * (col_w + Inches(0.15))
+        lx = ML + i * (col_w + gap)
         fg, bg = palette[i % 4]
 
-        # Stage header bar
         _rect(slide, lx, CONT_T, col_w, hdr_h, fg)
         _box(slide, lx, CONT_T, col_w, hdr_h,
              text=_trunc(stage.get("stage", f"Phase {i+1}"), 8),
-             size=11, bold=True, color=WHITE, align=PP_ALIGN.CENTER, ml=0.04, mt=0.06)
+             size=10, bold=True, color=WHITE, align=PP_ALIGN.CENTER, ml=0.04, mt=0.04)
 
-        # Content box — TEXT_TO_FIT_SHAPE keeps text inside the card
-        _, tf = _box(slide, lx, cont_t, col_w, cont_h, fill=bg, ml=0.08, mt=0.08)
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        tf.word_wrap = True
-
-        _para(tf, "目標", size=8, bold=True, color=fg)
-        _para(tf, _trunc(stage.get("objective", ""), 48), size=9, color=DARK)
-        _para(tf, "媒體管道", size=8, bold=True, color=fg, space_before=4)
+        _, tf = _box(slide, lx, cont_t, col_w, cont_h, fill=bg, ml=0.07, mt=0.07)
+        _para(tf, "目標", size=7, bold=True, color=fg)
+        _para(tf, _trunc(stage.get("objective", ""), 50), size=8, color=DARK)
+        _para(tf, "媒體管道", size=7, bold=True, color=fg, space_before=3)
         channels = "、".join(stage.get("channels", []))
-        _para(tf, _trunc(channels, 35), size=9, color=DARK)
-        _para(tf, "目標受眾", size=8, bold=True, color=fg, space_before=4)
-        _para(tf, _trunc(stage.get("audience", ""), 35), size=9, color=DARK)
-        _para(tf, "KPI", size=8, bold=True, color=fg, space_before=4)
-        _para(tf, _trunc(stage.get("kpi", ""), 28), size=9, bold=True, color=fg)
+        _para(tf, _trunc(channels, 38), size=8, color=DARK)
+        _para(tf, "目標受眾", size=7, bold=True, color=fg, space_before=3)
+        _para(tf, _trunc(stage.get("audience", ""), 38), size=8, color=DARK)
+        _para(tf, "KPI", size=7, bold=True, color=fg, space_before=3)
+        _para(tf, _trunc(stage.get("kpi", ""), 32), size=8, bold=True, color=fg)
 
 
 # ─────────────────────────── Phase 3 ──────────────────────────────────────────
@@ -346,40 +309,39 @@ def _slide_phase3(prs, p3: dict, phase_num: str = "03"):
 
     bm = p3.get("benchmarks", {})
     kpi_items = [
-        ("ROAS",  bm.get("industry_avg_roas", "—")),
-        ("CPC",   bm.get("industry_avg_cpc",  "—")),
-        ("CTR",   bm.get("industry_avg_ctr",  "—")),
-        ("CVR",   bm.get("industry_avg_cvr",  "—")),
+        ("ROAS", bm.get("industry_avg_roas", "—")),
+        ("CPC",  bm.get("industry_avg_cpc",  "—")),
+        ("CTR",  bm.get("industry_avg_ctr",  "—")),
+        ("CVR",  bm.get("industry_avg_cvr",  "—")),
     ]
 
-    kpi_w = (UW - Inches(0.45)) / 4
+    n_cols = 4
+    gap    = Inches(0.1)
+    kpi_w  = (UW - gap * (n_cols - 1)) / n_cols
+    kpi_h  = Inches(0.82)
+
     for i, (label, val) in enumerate(kpi_items):
-        lx = ML + i * (kpi_w + Inches(0.15))
-        _rect(slide, lx, CONT_T, kpi_w, Inches(0.08), TEAL)
-        _, tf = _box(slide, lx, CONT_T + Inches(0.08), kpi_w, Inches(1.1), fill=L_TEAL, ml=0.05, mt=0.08)
-        _para(tf, _trunc(str(val), 12), size=17, bold=True, color=TEAL, align=PP_ALIGN.CENTER)
-        _para(tf, f"產業平均 {label}", size=8, color=GRAY, align=PP_ALIGN.CENTER, space_before=2)
+        lx = ML + i * (kpi_w + gap)
+        _rect(slide, lx, CONT_T, kpi_w, Inches(0.06), TEAL)
+        _, tf = _box(slide, lx, CONT_T + Inches(0.06), kpi_w, kpi_h, fill=L_TEAL, ml=0.05, mt=0.06)
+        _para(tf, _trunc(str(val), 12), size=15, bold=True, color=TEAL, align=PP_ALIGN.CENTER)
+        _para(tf, f"產業平均 {label}", size=7, color=GRAY, align=PP_ALIGN.CENTER, space_before=2)
 
-    # Gap + Opportunities (side by side)
-    ty2 = CONT_T + Inches(1.35)
-    half_w = (UW - Inches(0.2)) / 2
+    ty2    = CONT_T + kpi_h + Inches(0.16)
+    half_w = (UW - Inches(0.14)) / 2
+    box_h  = CARD_B - (ty2 + Inches(0.2))
 
-    gap_text = _trunc(p3.get("competitive_gap", ""), 90)
+    gap_text = _trunc(p3.get("competitive_gap", ""), 100)
     _section_label(slide, "競爭差距分析", ML, ty2, TEAL)
-    box_h = SH - (ty2 + Inches(0.24)) - Inches(0.55)
-    _, tf = _box(slide, ML, ty2 + Inches(0.24), half_w, box_h, fill=L_TEAL, ml=0.1, mt=0.1)
-    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    tf.word_wrap = True
-    _para(tf, gap_text, size=9, color=DARK)
+    _, tf = _box(slide, ML, ty2 + Inches(0.2), half_w, box_h, fill=L_TEAL, ml=0.08, mt=0.08)
+    _para(tf, gap_text, size=8, color=DARK)
 
     opps = p3.get("growth_opportunities", [])
-    rx = ML + half_w + Inches(0.2)
+    rx = ML + half_w + Inches(0.14)
     _section_label(slide, "成長機會", rx, ty2, ORANGE)
-    _, tf = _box(slide, rx, ty2 + Inches(0.24), half_w, box_h, fill=L_ORNG, ml=0.1, mt=0.1)
-    tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-    tf.word_wrap = True
+    _, tf = _box(slide, rx, ty2 + Inches(0.2), half_w, box_h, fill=L_ORNG, ml=0.08, mt=0.08)
     for opp in opps[:4]:
-        _para(tf, f"- {_trunc(opp, 35)}", size=9, color=DARK)
+        _para(tf, f"- {_trunc(opp, 40)}", size=8, color=DARK)
 
 
 # ─────────────────────────── Phase 4 ──────────────────────────────────────────
@@ -394,62 +356,56 @@ def _slide_phase4(prs, p4: dict, phase_num: str = "04"):
     _page_header(slide, phase_num, "廣告創意策略", PURPLE, PURPLE)
     _footer(slide)
 
-    # Format tags row
     formats = p4.get("recommended_formats", [])
-    fx = ML
-    tag_h = Inches(0.32)
+    fx    = ML
+    tag_h = Inches(0.26)
     _section_label(slide, "建議廣告格式", ML, CONT_T, PURPLE)
     for fmt in formats[:5]:
-        tag_w = Inches(1.7)
+        tag_w = Inches(1.3)
         if fx + tag_w > ML + UW:
             break
-        _rect(slide, fx, CONT_T + Inches(0.24), tag_w, tag_h, L_PURP)
-        _box(slide, fx, CONT_T + Inches(0.24), tag_w, tag_h,
-             text=_trunc(fmt, 12), size=9, bold=True,
-             color=PURPLE, align=PP_ALIGN.CENTER, ml=0.05, mt=0.04)
-        fx += tag_w + Inches(0.12)
+        _rect(slide, fx, CONT_T + Inches(0.2), tag_w, tag_h, L_PURP)
+        _box(slide, fx, CONT_T + Inches(0.2), tag_w, tag_h,
+             text=_trunc(fmt, 12), size=8, bold=True,
+             color=PURPLE, align=PP_ALIGN.CENTER, ml=0.04, mt=0.03)
+        fx += tag_w + Inches(0.1)
 
-    # 3 creative dimensions
     dims = p4.get("creative_dimensions", {})
     dim_data = [
         ("trust_building", "品牌信任", NAVY,   L_NAVY),
         ("pain_point",     "痛點訴求", ORANGE, L_ORNG),
         ("conversion",     "轉換促購", TEAL,   L_TEAL),
     ]
-    col_w = (UW - Inches(0.3)) / 3
-    ty2   = CONT_T + Inches(0.78)
-    # Card bottom fixed to stay clear of footer
-    card_bottom = SH - Inches(0.55)
-    hdr_h4 = Inches(0.35)
-    body_t = ty2 + hdr_h4
-    body_h = card_bottom - body_t
+    n_cols = 3
+    gap    = Inches(0.1)
+    col_w  = (UW - gap * (n_cols - 1)) / n_cols
+    ty2    = CONT_T + Inches(0.55)
+    hdr_h  = Inches(0.28)
+    body_h = CARD_B - (ty2 + hdr_h)
 
     for i, (key, default_name, fg, bg) in enumerate(dim_data):
-        lx = ML + i * (col_w + Inches(0.15))
+        lx  = ML + i * (col_w + gap)
         dim = dims.get(key, {})
         name = _trunc(dim.get("name", default_name), 8)
-        desc = _trunc(dim.get("description", ""), 75)
+        desc = _trunc(dim.get("description", ""), 80)
         examples = dim.get("examples", [])
 
-        _rect(slide, lx, ty2, col_w, hdr_h4, fg)
-        _box(slide, lx, ty2, col_w, hdr_h4,
-             text=name, size=11, bold=True, color=WHITE,
-             align=PP_ALIGN.CENTER, ml=0.05, mt=0.06)
+        _rect(slide, lx, ty2, col_w, hdr_h, fg)
+        _box(slide, lx, ty2, col_w, hdr_h,
+             text=name, size=10, bold=True, color=WHITE,
+             align=PP_ALIGN.CENTER, ml=0.04, mt=0.05)
 
-        _, tf = _box(slide, lx, body_t, col_w, body_h, fill=bg, ml=0.1, mt=0.08)
-        tf.auto_size = MSO_AUTO_SIZE.TEXT_TO_FIT_SHAPE
-        tf.word_wrap = True
-        _para(tf, desc, size=9, color=DARK)
+        _, tf = _box(slide, lx, ty2 + hdr_h, col_w, body_h, fill=bg, ml=0.08, mt=0.07)
+        _para(tf, desc, size=8, color=DARK)
         if examples:
-            _para(tf, "素材範例", size=7, bold=True, color=fg, space_before=4)
+            _para(tf, "素材範例", size=7, bold=True, color=fg, space_before=3)
             for ex in examples[:2]:
-                _para(tf, f"- {_trunc(ex, 28)}", size=8, color=GRAY)
+                _para(tf, f"- {_trunc(ex, 30)}", size=7, color=GRAY)
 
 
 # ─────────────────────────── Phase 5 slides ───────────────────────────────────
 
 def _slide_phase5a(prs, p5: dict, phase_num: str = "05"):
-    """Phase 5-a: Budget allocation bar chart."""
     slide = _add_slide(prs)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = WHITE
@@ -457,59 +413,58 @@ def _slide_phase5a(prs, p5: dict, phase_num: str = "05"):
     _page_header(slide, phase_num, "媒體預算配置", ORANGE, ORANGE)
     _footer(slide)
 
-    budget = _trunc(str(p5.get("monthly_budget", "—")), 15)
-    roas   = _trunc(str(p5.get("expected_roas",  "—")), 15)
+    budget = _trunc(str(p5.get("monthly_budget", "—")), 14)
+    roas   = _trunc(str(p5.get("expected_roas",  "—")), 14)
     alloc  = p5.get("channel_allocation", [])
 
-    # Summary pills
-    pill_w = Inches(2.2)
+    pill_w = Inches(1.65)
+    pill_h = Inches(0.7)
     for j, (val, label, c) in enumerate([
         (budget, "月預算規模", NAVY),
         (roas,   "預期 ROAS", TEAL),
     ]):
-        px = ML + j * (pill_w + Inches(0.2))
-        _rect(slide, px, CONT_T, pill_w, Inches(0.9), c)
-        _box(slide, px, CONT_T, pill_w, Inches(0.55),
-             text=val, size=18, bold=True, color=WHITE,
-             align=PP_ALIGN.CENTER, ml=0.05, mt=0.08)
-        _box(slide, px, CONT_T + Inches(0.55), pill_w, Inches(0.35),
-             text=label, size=8, color=RGBColor(0xCC,0xDD,0xE5),
-             align=PP_ALIGN.CENTER, ml=0.05, mt=0.02)
+        px = ML + j * (pill_w + Inches(0.15))
+        _rect(slide, px, CONT_T, pill_w, pill_h, c)
+        _box(slide, px, CONT_T, pill_w, Inches(0.42),
+             text=val, size=15, bold=True, color=WHITE,
+             align=PP_ALIGN.CENTER, ml=0.04, mt=0.06)
+        _box(slide, px, CONT_T + Inches(0.42), pill_w, Inches(0.28),
+             text=label, size=7, color=RGBColor(0xCC, 0xDD, 0xE5),
+             align=PP_ALIGN.CENTER, ml=0.04, mt=0.02)
 
-    # Bar chart
-    ty = CONT_T + Inches(1.1)
+    ty       = CONT_T + pill_h + Inches(0.1)
     _section_label(slide, "媒體管道配置", ML, ty, ORANGE)
-    ty += Inches(0.25)
+    ty      += Inches(0.2)
 
-    bar_max   = UW * 0.38
-    row_h     = Inches(0.5)
-    ch_col_w  = Inches(1.5)
-    max_rows  = int((SH - ty - Inches(0.3)) / row_h)
+    bar_max  = UW * 0.4
+    row_h    = Inches(0.38)
+    ch_col_w = Inches(1.1)
+    max_rows = int((CARD_B - ty) / row_h)
 
     for ch in alloc[:min(6, max_rows)]:
         channel = _trunc(ch.get("channel", ""), 10)
         pct     = min(int(ch.get("percentage", 0)), 100)
-        reason  = _trunc(ch.get("rationale", ""), 32)
+        reason  = _trunc(ch.get("rationale", ""), 30)
 
         _box(slide, ML, ty, ch_col_w, row_h,
-             text=channel, size=9, bold=True, color=DARK, ml=0, mt=0.12)
+             text=channel, size=8, bold=True, color=DARK, ml=0, mt=0.08)
 
-        bar_x = ML + ch_col_w + Inches(0.1)
-        _rect(slide, bar_x, ty + Inches(0.12), bar_max, Inches(0.26), MIDGRAY)
+        bar_x = ML + ch_col_w + Inches(0.08)
+        _rect(slide, bar_x, ty + Inches(0.09), bar_max, Inches(0.2), MIDGRAY)
         if pct > 0:
-            _rect(slide, bar_x, ty + Inches(0.12),
-                  bar_max * pct / 100, Inches(0.26), ORANGE)
-        _box(slide, bar_x + bar_max + Inches(0.08), ty, Inches(0.5), row_h,
-             text=f"{pct}%", size=9, bold=True, color=ORANGE,
-             align=PP_ALIGN.CENTER, ml=0, mt=0.12)
-        _box(slide, bar_x + bar_max + Inches(0.65), ty,
-             UW - ch_col_w - Inches(0.1) - bar_max - Inches(0.65), row_h,
-             text=reason, size=8, color=GRAY, ml=0, mt=0.12)
+            _rect(slide, bar_x, ty + Inches(0.09),
+                  bar_max * pct / 100, Inches(0.2), ORANGE)
+        _box(slide, bar_x + bar_max + Inches(0.07), ty, Inches(0.42), row_h,
+             text=f"{pct}%", size=8, bold=True, color=ORANGE,
+             align=PP_ALIGN.CENTER, ml=0, mt=0.08)
+        remaining_w = UW - ch_col_w - Inches(0.08) - bar_max - Inches(0.55)
+        if remaining_w > Inches(0.3):
+            _box(slide, bar_x + bar_max + Inches(0.55), ty, remaining_w, row_h,
+                 text=reason, size=7, color=GRAY, ml=0, mt=0.08)
         ty += row_h
 
 
 def _slide_phase5b(prs, p5: dict, phase_num: str = "06"):
-    """Phase 5-b: Campaign schedule table + CTA."""
     slide = _add_slide(prs)
     slide.background.fill.solid()
     slide.background.fill.fore_color.rgb = WHITE
@@ -518,49 +473,48 @@ def _slide_phase5b(prs, p5: dict, phase_num: str = "06"):
     _footer(slide)
 
     campaigns = p5.get("key_campaigns", [])
-    tl_note   = _trunc(p5.get("timeline_note", ""), 85)
+    tl_note   = _trunc(p5.get("timeline_note", ""), 80)
 
-    # Table header
     ty  = CONT_T
-    cws = [Inches(2.2), Inches(1.7), UW - Inches(4.1)]
+    cws = [Inches(1.8), Inches(1.3), UW - Inches(3.3)]
     hdrs = ["活動名稱", "執行時間", "重點說明"]
     lx  = ML
     for h, w in zip(hdrs, cws):
-        _rect(slide, lx, ty, w - Inches(0.04), Inches(0.36), NAVY)
-        _box(slide, lx, ty, w - Inches(0.04), Inches(0.36),
-             text=h, size=9, bold=True, color=WHITE, align=PP_ALIGN.CENTER,
-             ml=0.06, mt=0.06)
+        _rect(slide, lx, ty, w - Inches(0.03), Inches(0.28), NAVY)
+        _box(slide, lx, ty, w - Inches(0.03), Inches(0.28),
+             text=h, size=8, bold=True, color=WHITE, align=PP_ALIGN.CENTER,
+             ml=0.05, mt=0.04)
         lx += w
 
-    ty += Inches(0.36)
-    row_h = Inches(0.5)
-    max_rows = int((SH - ty - Inches(1.2)) / row_h)
+    ty    += Inches(0.28)
+    row_h  = Inches(0.37)
+    max_rows = int((CARD_B - ty - Inches(0.42)) / row_h)
 
     for i, c in enumerate(campaigns[:min(5, max_rows)]):
         bg = L_GRAY if i % 2 == 0 else WHITE
         lx = ML
-        vals = [_trunc(c.get("name",""),18), _trunc(c.get("timing",""),14),
-                _trunc(c.get("focus",""),42)]
+        vals = [_trunc(c.get("name",  ""), 16),
+                _trunc(c.get("timing",""), 12),
+                _trunc(c.get("focus", ""), 45)]
         for val, w in zip(vals, cws):
-            _rect(slide, lx, ty, w - Inches(0.04), row_h, bg)
-            _box(slide, lx, ty, w - Inches(0.04), row_h,
-                 text=val, size=9, color=DARK, ml=0.08, mt=0.1)
+            _rect(slide, lx, ty, w - Inches(0.03), row_h, bg)
+            _box(slide, lx, ty, w - Inches(0.03), row_h,
+                 text=val, size=8, color=DARK, ml=0.06, mt=0.07)
             lx += w
         ty += row_h
 
-    # Timeline note
     if tl_note:
-        _rect(slide, ML, ty + Inches(0.12), UW, Inches(0.42), L_ORNG)
-        _box(slide, ML + Inches(0.1), ty + Inches(0.12), UW - Inches(0.1), Inches(0.42),
-             text=f"執行建議  |  {tl_note}", size=9, color=NAVY, ml=0.08, mt=0.1)
-        ty += Inches(0.58)
+        note_t = min(ty + Inches(0.08), CARD_B - Inches(0.35))
+        _rect(slide, ML, note_t, UW, Inches(0.32), L_ORNG)
+        _box(slide, ML + Inches(0.08), note_t, UW - Inches(0.08), Inches(0.32),
+             text=f"執行建議  |  {tl_note}", size=8, color=NAVY, ml=0.06, mt=0.07)
+        ty = note_t + Inches(0.38)
 
-    # CTA
-    cta_t = SH - Inches(0.85)
-    _rect(slide, Inches(0), cta_t, SW, Inches(0.75), NAVY)
-    _box(slide, ML, cta_t, UW, Inches(0.75),
+    cta_t = SH - Inches(0.62)
+    _rect(slide, Inches(0), cta_t, SW, Inches(0.52), NAVY)
+    _box(slide, ML, cta_t, UW, Inches(0.52),
          text="立即聯繫潮網科技  ·  讓我們為您打造專屬數位行銷方案",
-         size=13, bold=True, color=WHITE, align=PP_ALIGN.CENTER, ml=0.1, mt=0.18)
+         size=11, bold=True, color=WHITE, align=PP_ALIGN.CENTER, ml=0.08, mt=0.12)
 
 
 # ─────────────────────────── Main entry ───────────────────────────────────────
