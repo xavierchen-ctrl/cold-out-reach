@@ -222,7 +222,7 @@ def _parse_gemini_response(raw: str) -> dict:
 
 # ── Template management ───────────────────────────────────────────────────────
 
-_TEMPLATES_DIR  = Path(__file__).parent.parent / "templates"
+_TEMPLATES_DIR  = Path(os.getenv("TEMPLATES_DIR", str(Path(__file__).parent.parent / "templates")))
 _DESIGN_TOKENS  = _TEMPLATES_DIR / "design_tokens.json"
 _DEFAULT_TPL    = "wavenet_template.pptx"
 

@@ -23,7 +23,7 @@ from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
-_TEMPLATES_DIR  = os.path.join(os.path.dirname(__file__), "templates")
+_TEMPLATES_DIR  = os.getenv("TEMPLATES_DIR", os.path.join(os.path.dirname(__file__), "templates"))
 # The Wavenet company-intro base is ALWAYS used — never replaced by uploads.
 _BASE_TEMPLATE  = os.path.join(_TEMPLATES_DIR, "wavenet_template.pptx")
 # Design tokens extracted from reference uploads.
