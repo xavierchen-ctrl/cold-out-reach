@@ -207,7 +207,7 @@ function TemplateManager() {
             </span>
           </label>
           <p className="text-xs text-slate-400 mt-1 mb-3">
-            支援 .pptx 格式 · 上傳後可設為使用中範本 · 下次產生 PPT 即套用新設計
+            支援 .pptx 格式 · 上傳後可設為設計參考 · 系統將擷取配色與字型，下次產生 PPT 即套用
           </p>
 
           {/* Template list */}
@@ -234,14 +234,14 @@ function TemplateManager() {
 
                   {tpl.active ? (
                     <span className="inline-flex items-center gap-1 text-xs text-blue-600 font-medium shrink-0">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> 使用中
+                      <CheckCircle2 className="w-3.5 h-3.5" /> 設計參考中
                     </span>
                   ) : (
                     <button
                       onClick={() => handleActivate(tpl.filename)}
                       className="text-xs text-blue-600 hover:underline shrink-0"
                     >
-                      啟用
+                      設為設計參考
                     </button>
                   )}
 

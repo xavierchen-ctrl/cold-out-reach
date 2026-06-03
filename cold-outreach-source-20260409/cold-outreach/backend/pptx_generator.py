@@ -12,6 +12,7 @@ Template design language (reverse-engineered from real PPTX):
   - Layout        : number badge top-left + title, white bg
 """
 import os
+import json
 from io import BytesIO
 from datetime import datetime
 
@@ -20,18 +21,67 @@ from pptx.util import Pt, Emu, Inches
 from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN, MSO_AUTO_SIZE
 
-_TEMPLATES_DIR   = os.path.join(os.path.dirname(__file__), "templates")
-_DEFAULT_TEMPLATE = os.path.join(_TEMPLATES_DIR, "wavenet_template.pptx")
-_ACTIVE_CFG       = os.path.join(_TEMPLATES_DIR, "active_template.txt")
+_TEMPLATES_DIR  = os.path.join(os.path.dirname(__file__), "templates")
+# The Wavenet company-intro base is ALWAYS used — never replaced by uploads.
+_BASE_TEMPLATE  = os.path.join(_TEMPLATES_DIR, "wavenet_template.pptx")
+# Design tokens extracted from reference uploads.
+_DESIGN_TOKENS  = os.path.join(_TEMPLATES_DIR, "design_tokens.json")
 
 
-def _get_template_path() -> str:
-    if os.path.exists(_ACTIVE_CFG):
-        name = open(_ACTIVE_CFG).read().strip()
-        path = os.path.join(_TEMPLATES_DIR, name)
-        if os.path.exists(path):
-            return path
-    return _DEFAULT_TEMPLATE
+def _load_design_tokens() -> dict:
+    """Return color/font tokens extracted from the reference file, or {}."""
+    if not os.path.exists(_DESIGN_TOKENS):
+        return {}
+    try:
+        return json.load(open(_DESIGN_TOKENS, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def extract_design_tokens(pptx_path: str) -> dict:
+    """
+    Scan content slides (11+) of a reference PPTX for dominant colors/font.
+    Returns { "primary", "accent", "secondary", "font", "source" }.
+    """
+    from collections import Counter
+    try:
+        prs = Presentation(pptx_path)
+    except Exception:
+        return {}
+
+    color_counts: Counter = Counter()
+    font_counts:  Counter = Counter()
+    start = min(10, len(prs.slides))
+
+    for slide in prs.slides[start:]:
+        for shape in slide.shapes:
+            try:
+                rgb = shape.fill.fore_color.rgb
+                r, g, b = rgb[0], rgb[1], rgb[2]
+                # Skip near-white and near-black
+                if not (r > 230 and g > 230 and b > 230) and \
+                   not (r < 30  and g < 30  and b < 30):
+                    color_counts[f"#{r:02X}{g:02X}{b:02X}"] += 1
+            except Exception:
+                pass
+            if hasattr(shape, "text_frame"):
+                try:
+                    for para in shape.text_frame.paragraphs:
+                        for run in para.runs:
+                            if run.font.name:
+                                font_counts[run.font.name] += 1
+                except Exception:
+                    pass
+
+    top_colors = [c for c, _ in color_counts.most_common(5)]
+    top_font   = font_counts.most_common(1)[0][0] if font_counts else None
+    tokens: dict = {}
+    if len(top_colors) > 0: tokens["primary"]   = top_colors[0]
+    if len(top_colors) > 1: tokens["accent"]    = top_colors[1]
+    if len(top_colors) > 2: tokens["secondary"] = top_colors[2]
+    if top_font:             tokens["font"]      = top_font
+    tokens["source"] = os.path.basename(pptx_path)
+    return tokens
 
 # ── Slide geometry matching actual Wavenet template (10 × 5.625 in) ──────────
 SW   = Emu(9144000)    # 10 in
@@ -531,29 +581,47 @@ def _slide_phase5b(prs, p5: dict, phase_num: str = "06"):
 # ─────────────────────────── Main entry ───────────────────────────────────────
 
 def generate_pptx(proposal: dict) -> BytesIO:
-    prs = Presentation(_get_template_path())
+    # ── Apply design tokens from reference file (if any) ──────────────────────
+    # Always use the Wavenet base template — uploads only supply colour/font.
+    global NAVY, ORANGE, TEAL, FONT
+    orig_navy, orig_orange, orig_teal, orig_font = NAVY, ORANGE, TEAL, FONT
 
-    _update_cover(prs.slides[0], proposal)
-    _delete_slides_from(prs, keep_count=10)
+    def _hex(s: str) -> RGBColor:
+        h = s.lstrip("#")
+        return RGBColor(int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
 
-    content = proposal.get("content") or {}
-    p2 = content.get("phase2") or {}
-    p3 = content.get("phase3") or {}
-    p4 = content.get("phase4") or {}
-    p5 = content.get("phase5") or {}
+    tokens = _load_design_tokens()
+    if tokens.get("primary"):   NAVY   = _hex(tokens["primary"])
+    if tokens.get("accent"):    ORANGE = _hex(tokens["accent"])
+    if tokens.get("secondary"): TEAL   = _hex(tokens["secondary"])
+    if tokens.get("font"):      FONT   = tokens["font"]
 
-    _slide_section(prs, "01", "數位行銷策略提案", NAVY)
-    _slide_phase2a(prs, p2, "01")
-    _slide_phase2b(prs, p2, "02")
-    _slide_section(prs, "02", "市場數據洞察", TEAL)
-    _slide_phase3(prs, p3, "03")
-    _slide_section(prs, "03", "廣告創意策略", RGBColor(0x5C, 0x35, 0xA8))
-    _slide_phase4(prs, p4, "04")
-    _slide_section(prs, "04", "媒體預算規劃", ORANGE)
-    _slide_phase5a(prs, p5, "05")
-    _slide_phase5b(prs, p5, "06")
+    try:
+        prs = Presentation(_BASE_TEMPLATE)
+        _update_cover(prs.slides[0], proposal)
+        _delete_slides_from(prs, keep_count=10)
 
-    buf = BytesIO()
-    prs.save(buf)
-    buf.seek(0)
-    return buf
+        content = proposal.get("content") or {}
+        p2 = content.get("phase2") or {}
+        p3 = content.get("phase3") or {}
+        p4 = content.get("phase4") or {}
+        p5 = content.get("phase5") or {}
+
+        _slide_section(prs, "01", "數位行銷策略提案", NAVY)
+        _slide_phase2a(prs, p2, "01")
+        _slide_phase2b(prs, p2, "02")
+        _slide_section(prs, "02", "市場數據洞察", TEAL)
+        _slide_phase3(prs, p3, "03")
+        _slide_section(prs, "03", "廣告創意策略", RGBColor(0x5C, 0x35, 0xA8))
+        _slide_phase4(prs, p4, "04")
+        _slide_section(prs, "04", "媒體預算規劃", ORANGE)
+        _slide_phase5a(prs, p5, "05")
+        _slide_phase5b(prs, p5, "06")
+
+        buf = BytesIO()
+        prs.save(buf)
+        buf.seek(0)
+        return buf
+    finally:
+        # Restore palette so module state is clean for the next request
+        NAVY, ORANGE, TEAL, FONT = orig_navy, orig_orange, orig_teal, orig_font

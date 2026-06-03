@@ -223,20 +223,27 @@ def _parse_gemini_response(raw: str) -> dict:
 # ── Template management ───────────────────────────────────────────────────────
 
 _TEMPLATES_DIR  = Path(__file__).parent.parent / "templates"
-_ACTIVE_CFG     = _TEMPLATES_DIR / "active_template.txt"
+_DESIGN_TOKENS  = _TEMPLATES_DIR / "design_tokens.json"
 _DEFAULT_TPL    = "wavenet_template.pptx"
 
 
 @router.get("/templates")
 async def list_templates(current_user: User = Depends(get_current_user)):
     _TEMPLATES_DIR.mkdir(exist_ok=True)
-    active = _ACTIVE_CFG.read_text().strip() if _ACTIVE_CFG.exists() else _DEFAULT_TPL
+    # Determine which file is the active reference (from tokens file)
+    active_source = ""
+    if _DESIGN_TOKENS.exists():
+        try:
+            active_source = json.loads(_DESIGN_TOKENS.read_text()).get("source", "")
+        except Exception:
+            pass
+
     result = []
     for f in sorted(_TEMPLATES_DIR.glob("*.pptx"), key=lambda x: x.stat().st_mtime, reverse=True):
         result.append({
             "filename": f.name,
             "size_kb": round(f.stat().st_size / 1024),
-            "active": f.name == active,
+            "active": f.name == active_source,
         })
     return result
 
@@ -270,10 +277,14 @@ async def activate_template(
     filename: str,
     current_user: User = Depends(get_current_user),
 ):
-    if not (_TEMPLATES_DIR / filename).exists():
+    path = _TEMPLATES_DIR / filename
+    if not path.exists():
         raise HTTPException(404, "範本不存在")
-    _ACTIVE_CFG.write_text(filename)
-    return {"ok": True, "active": filename}
+    from pptx_generator import extract_design_tokens
+    tokens = extract_design_tokens(str(path))
+    _TEMPLATES_DIR.mkdir(exist_ok=True)
+    _DESIGN_TOKENS.write_text(json.dumps(tokens, ensure_ascii=False))
+    return {"ok": True, "tokens": tokens}
 
 
 @router.delete("/templates/{filename}")
@@ -286,9 +297,13 @@ async def delete_template(
     path = _TEMPLATES_DIR / filename
     if path.exists():
         path.unlink()
-    # if deleted file was active, revert to default
-    if _ACTIVE_CFG.exists() and _ACTIVE_CFG.read_text().strip() == filename:
-        _ACTIVE_CFG.write_text(_DEFAULT_TPL)
+    # if deleted file was the active reference, clear design tokens
+    if _DESIGN_TOKENS.exists():
+        try:
+            if json.loads(_DESIGN_TOKENS.read_text()).get("source") == filename:
+                _DESIGN_TOKENS.unlink()
+        except Exception:
+            pass
     return {"ok": True}
 
 
