@@ -12,7 +12,6 @@ Template design language (reverse-engineered from real PPTX):
   - Layout        : number badge top-left + title, white bg
 """
 import os
-import copy
 import json
 from io import BytesIO
 from datetime import datetime
@@ -240,11 +239,13 @@ def _add_slide(prs: Presentation, ref_slide=None):
 
 def _copy_slide(dest_prs: Presentation, src_slide):
     """
-    Copy visual elements from src_slide into a new slide in dest_prs:
-    - Solid-fill <p:sp> shapes without text are copied and coordinate-scaled.
-    - Embedded images are re-embedded via blob so they display without warnings.
-    - Externally-linked images (the ones PowerPoint blocks) are skipped.
-    - Text shapes are skipped; caller layers fresh AI content on top.
+    Copy the visual design from src_slide into a new blank slide in dest_prs.
+
+    Uses python-pptx high-level API only — no XML deep-copy, so there is
+    zero possibility of externally-linked image references leaking into the
+    output and triggering PowerPoint's 'blocked auto-download' warning.
+
+    Only solid-fill geometric shapes are transferred (no images, no text).
     """
     layout = dest_prs.slide_layouts[-1]
     for lay in dest_prs.slide_layouts:
@@ -253,20 +254,7 @@ def _copy_slide(dest_prs: Presentation, src_slide):
             break
     new_slide = dest_prs.slides.add_slide(layout)
 
-    # Copy slide background fill (skip if it uses an image — can't re-embed safely)
-    try:
-        src_bg = src_slide.background._element
-        _BF = "{http://schemas.openxmlformats.org/drawingml/2006/main}blipFill"
-        if not any(True for _ in src_bg.iter(_BF)):
-            dst_bg = new_slide.background._element
-            for child in list(dst_bg):
-                dst_bg.remove(child)
-            for child in list(src_bg):
-                dst_bg.append(copy.deepcopy(child))
-    except Exception:
-        pass
-
-    # Scale factors — reference may be 13.33×7.5" while output is 10×5.625"
+    # Scale factors — reference may differ from destination (e.g. 13.33×7.5" → 10×5.625")
     try:
         src_w = src_slide.part.presentation.slide_width
         src_h = src_slide.part.presentation.slide_height
@@ -274,71 +262,38 @@ def _copy_slide(dest_prs: Presentation, src_slide):
         src_w, src_h = SW, SH
     scale_x = dest_prs.slide_width  / max(src_w, 1)
     scale_y = dest_prs.slide_height / max(src_h, 1)
+    _DW = int(dest_prs.slide_width)
+    _DH = int(dest_prs.slide_height)
 
-    _NS_A = "{http://schemas.openxmlformats.org/drawingml/2006/main}"
-    _DW   = int(dest_prs.slide_width)
-    _DH   = int(dest_prs.slide_height)
+    def _sb(left, top, width, height):
+        """Scale and clamp to destination slide dimensions."""
+        l = max(0, min(round(left   * scale_x), _DW - 1))
+        t = max(0, min(round(top    * scale_y), _DH - 1))
+        w = max(1, min(round(width  * scale_x), _DW - l))
+        h = max(1, min(round(height * scale_y), _DH - t))
+        return l, t, w, h
 
-    def _scale_xfrm(elem_copy):
-        for xfrm in elem_copy.iter(f"{_NS_A}xfrm"):
-            off = xfrm.find(f"{_NS_A}off")
-            ext = xfrm.find(f"{_NS_A}ext")
-            if off is not None:
-                try:
-                    off.set('x', str(round(int(off.get('x', 0)) * scale_x)))
-                    off.set('y', str(round(int(off.get('y', 0)) * scale_y)))
-                except Exception:
-                    pass
-            if ext is not None:
-                try:
-                    ext.set('cx', str(round(int(ext.get('cx', 0)) * scale_x)))
-                    ext.set('cy', str(round(int(ext.get('cy', 0)) * scale_y)))
-                except Exception:
-                    pass
+    # ── Background: solid color only ─────────────────────────────────────────
+    try:
+        bg_fill = src_slide.background.fill
+        if bg_fill.type == 1:  # MSO_FILL.SOLID
+            new_slide.background.fill.solid()
+            new_slide.background.fill.fore_color.rgb = bg_fill.fore_color.rgb
+    except Exception:
+        pass
 
-    def _clamp_xfrm(elem_copy):
-        """Keep copied shapes entirely within the destination slide boundary."""
-        for xfrm in elem_copy.iter(f"{_NS_A}xfrm"):
-            off = xfrm.find(f"{_NS_A}off")
-            ext = xfrm.find(f"{_NS_A}ext")
-            if off is None or ext is None:
+    # ── Solid-fill shapes: re-create via add_shape (no XML copy) ─────────────
+    for shape in src_slide.shapes:
+        try:
+            # Skip any shape that has visible text
+            if shape.has_text_frame and shape.text_frame.text.strip():
                 continue
-            try:
-                x  = max(0, int(off.get('x',  0)))
-                y  = max(0, int(off.get('y',  0)))
-                cx = max(1, int(ext.get('cx', 1)))
-                cy = max(1, int(ext.get('cy', 1)))
-                x  = min(x,  _DW - 1)
-                y  = min(y,  _DH - 1)
-                cx = min(cx, _DW - x)
-                cy = min(cy, _DH - y)
-                off.set('x',  str(x));  off.set('y',  str(y))
-                ext.set('cx', str(cx)); ext.set('cy', str(cy))
-            except Exception:
-                pass
-
-    src_tree = src_slide.shapes._spTree
-    dst_tree = new_slide.shapes._spTree
-    while len(dst_tree) > 2:
-        dst_tree.remove(dst_tree[-1])
-
-    # ── Decorative shapes only: solid/gradient fills, no text, no image ref ─────
-    # We deliberately skip ALL image-bearing shapes from reference slides.
-    # Images in reference slides are externally-linked (or have r:embed+r:link
-    # metadata that makes PowerPoint show "blocked auto-download" warnings).
-    # Reference slides contribute only geometry and color — not image content.
-    _BLIP = f"{_NS_A}blip"
-    for elem in list(src_tree)[2:]:
-        if not elem.tag.endswith("}sp"):
-            continue
-        if any((t.text or "").strip() for t in elem.iter(f"{_NS_A}t")):
-            continue
-        if any(True for _ in elem.iter(_BLIP)):
-            continue  # shape contains an image reference — skip entirely
-        elem_copy = copy.deepcopy(elem)
-        _scale_xfrm(elem_copy)
-        _clamp_xfrm(elem_copy)
-        dst_tree.append(elem_copy)
+            # fore_color.rgb raises for non-solid fills (image, gradient, none)
+            rgb = shape.fill.fore_color.rgb
+            l, t, w, h = _sb(shape.left, shape.top, shape.width, shape.height)
+            _rect(new_slide, l, t, w, h, rgb)
+        except Exception:
+            pass  # gradient / image / transparent / unsupported — skip silently
 
     return new_slide
 
