@@ -117,7 +117,7 @@ async def generate_weekly_report(
     
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         report_content = response.text
     except Exception as e:
@@ -251,3 +251,4 @@ li {{ margin: 4px 0; }}
 </html>"""
     
     return HTMLResponse(content=html)
+

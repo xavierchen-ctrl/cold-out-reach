@@ -75,6 +75,7 @@ class Lead(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_name = Column(String(255), nullable=False)
     contact_name = Column(String(255), nullable=True)
+    department = Column(String(255), nullable=True)
     title = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)

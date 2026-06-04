@@ -125,6 +125,7 @@ async def lifespan(app: FastAPI):
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS tax_id VARCHAR(20)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS representative_name VARCHAR(255)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS capital_amount VARCHAR(50)"))
+            conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS department VARCHAR(255)"))
             # Team-based RBAC
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS teams (

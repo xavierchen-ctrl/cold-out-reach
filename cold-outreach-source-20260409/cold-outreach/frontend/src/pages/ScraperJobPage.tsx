@@ -18,12 +18,12 @@ interface ScrapedCompany {
 export default function ScraperJobPage() {
   const { id } = useParams()
   const navigate = useNavigate()
-  
+
   const [loading, setLoading] = useState(true)
   const [companies, setCompanies] = useState<ScrapedCompany[]>([])
-  const [importEmailOnly, setImportEmailOnly] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     if (!id) return
@@ -40,11 +40,34 @@ export default function ScraperJobPage() {
     fetchJob()
   }, [id])
 
+  const allSelected = companies.length > 0 && selectedIndices.size === companies.length
+  const someSelected = selectedIndices.size > 0
+
+  const toggleAll = () => {
+    if (allSelected) {
+      setSelectedIndices(new Set())
+    } else {
+      setSelectedIndices(new Set(companies.map((_, i) => i)))
+    }
+  }
+
+  const toggleOne = (idx: number) => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev)
+      if (next.has(idx)) next.delete(idx)
+      else next.add(idx)
+      return next
+    })
+  }
+
+  const importCount = someSelected ? selectedIndices.size : companies.length
+
   const handleImport = async () => {
     if (!id) return
     setImporting(true)
     try {
-      const res = await importScraperJob(id, undefined, importEmailOnly)
+      const indices = someSelected ? Array.from(selectedIndices) : undefined
+      const res = await importScraperJob(id, undefined, undefined, indices)
       alert(`✅ 匯入完成：新增/更新 ${res.data.created} 筆，跳過 ${res.data.skipped} 筆`)
       navigate('/leads')
     } catch (err: any) {
@@ -57,7 +80,6 @@ export default function ScraperJobPage() {
   if (loading) return <div className="flex p-8 items-center justify-center text-muted-foreground">載入中...</div>
   if (error) return <div className="p-8 text-destructive">{error}</div>
 
-  const displayedCount = companies.length
   const withEmailCount = companies.filter(c => c.email).length
   const withPhoneCount = companies.filter(c => c.phone).length
 
@@ -71,23 +93,17 @@ export default function ScraperJobPage() {
           </Button>
           <div>
             <h1 className="text-xl font-bold text-gray-900">爬蟲名單檢視</h1>
-            <p className="text-sm text-muted-foreground">總共掃描到 {displayedCount} 間公司　有電話 {withPhoneCount} 筆　有 Email {withEmailCount} 筆</p>
+            <p className="text-sm text-muted-foreground">
+              總共 {companies.length} 筆　有電話 {withPhoneCount} 筆　有 Email {withEmailCount} 筆
+              {someSelected && <span className="ml-2 text-primary font-medium">已勾選 {selectedIndices.size} 筆</span>}
+            </p>
           </div>
         </div>
-        
+
         <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 text-sm cursor-pointer select-none bg-gray-100 px-3 py-1.5 rounded-full text-gray-700">
-            <input
-              type="checkbox"
-              checked={importEmailOnly}
-              onChange={e => setImportEmailOnly(e.target.checked)}
-              className="rounded text-primary focus:ring-primary w-4 h-4"
-            />
-            <span>只匯入有 Email 的 ({withEmailCount} 筆)</span>
-          </label>
           <Button onClick={handleImport} disabled={importing} className="shadow-sm">
             <Download className="w-4 h-4 mr-2" />
-            {importing ? '匯入中...' : `匯入名單 (${importEmailOnly ? withEmailCount : displayedCount})`}
+            {importing ? '匯入中...' : `匯入名單 (${importCount})`}
           </Button>
         </div>
       </header>
@@ -98,7 +114,17 @@ export default function ScraperJobPage() {
           <table className="w-full text-left">
             <thead className="bg-gray-50 text-gray-600 font-medium">
               <tr>
-                <th className="py-3 px-4 text-center text-gray-400 w-12">#</th>
+                <th className="py-3 px-4 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
+                    onChange={toggleAll}
+                    className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                    title={allSelected ? '取消全選' : '全選'}
+                  />
+                </th>
+                <th className="py-3 px-4 text-center text-gray-400 w-10">#</th>
                 <th className="py-3 px-4">公司資訊</th>
                 <th className="py-3 px-4 hidden sm:table-cell w-48">網址</th>
                 <th className="py-3 px-4">聯絡人</th>
@@ -108,84 +134,105 @@ export default function ScraperJobPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {companies.map((c, idx) => (
-                <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                  <td className="py-4 px-4 text-center text-xs text-gray-400">{idx + 1}</td>
-                  
-                  <td className="py-2 px-4">
-                    <div className="flex items-start gap-2">
-                      <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
-                      <div>
-                        <div className="font-semibold text-gray-900 leading-tight">{c.company_name}</div>
-                        {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}
-                      </div>
-                    </div>
-                  </td>
+              {companies.map((c, idx) => {
+                const checked = selectedIndices.has(idx)
+                return (
+                  <tr
+                    key={idx}
+                    onClick={() => toggleOne(idx)}
+                    className={`transition-colors cursor-pointer ${checked ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                  >
+                    <td className="py-4 px-4" onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => toggleOne(idx)}
+                        className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                      />
+                    </td>
 
-                  <td className="py-2 px-4 hidden sm:table-cell">
-                    {c.website ? (
-                      <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noreferrer" className="text-blue-500 hover:underline text-xs break-all">
-                        {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
-                      </a>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
+                    <td className="py-4 px-4 text-center text-xs text-gray-400">{idx + 1}</td>
 
-                  <td className="py-2 px-4">
-                    {c.contact_name ? (
+                    <td className="py-2 px-4">
                       <div className="flex items-start gap-2">
-                        <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                        <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
                         <div>
-                          <p className="font-medium text-gray-800">{c.contact_name}</p>
-                          {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
+                          <div className="font-semibold text-gray-900 leading-tight">{c.company_name}</div>
+                          {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}
                         </div>
                       </div>
-                    ) : (
-                      <span className="text-xs text-gray-400 italic">— 無 —</span>
-                    )}
-                  </td>
+                    </td>
 
-                  <td className="py-2 px-4 hidden md:table-cell">
-                    <div className="space-y-1">
-                      {c.industry && (
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <Briefcase className="w-3.5 h-3.5" /> {c.industry}
-                        </div>
+                    <td className="py-2 px-4 hidden sm:table-cell">
+                      {c.website ? (
+                        <a
+                          href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={e => e.stopPropagation()}
+                          className="text-blue-500 hover:underline text-xs break-all"
+                        >
+                          {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
                       )}
-                      {c.city && (
-                        <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                          <MapPin className="w-3.5 h-3.5" /> {c.city}
+                    </td>
+
+                    <td className="py-2 px-4">
+                      {c.contact_name ? (
+                        <div className="flex items-start gap-2">
+                          <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                          <div>
+                            <p className="font-medium text-gray-800">{c.contact_name}</p>
+                            {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
+                          </div>
                         </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">— 無 —</span>
                       )}
-                    </div>
-                  </td>
+                    </td>
 
-                  <td className="py-2 px-4 hidden lg:table-cell">
-                    {c.phone ? (
-                      <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
-                        <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
+                    <td className="py-2 px-4 hidden md:table-cell">
+                      <div className="space-y-1">
+                        {c.industry && (
+                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                            <Briefcase className="w-3.5 h-3.5" /> {c.industry}
+                          </div>
+                        )}
+                        {c.city && (
+                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                            <MapPin className="w-3.5 h-3.5" /> {c.city}
+                          </div>
+                        )}
                       </div>
-                    ) : (
-                      <span className="text-xs text-gray-300">—</span>
-                    )}
-                  </td>
+                    </td>
 
-                  <td className="py-2 px-4 hidden lg:table-cell">
-                    {c.email ? (
-                      <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
-                        <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
-                      </div>
-                    ) : (
-                      <span className="text-xs text-gray-300">—</span>
-                    )}
-                  </td>
+                    <td className="py-2 px-4 hidden lg:table-cell">
+                      {c.phone ? (
+                        <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
+                          <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
+                    </td>
 
-                </tr>
-              ))}
+                    <td className="py-2 px-4 hidden lg:table-cell">
+                      {c.email ? (
+                        <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
+                          <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-300">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
               {companies.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="py-12 text-center text-muted-foreground">
+                  <td colSpan={8} className="py-12 text-center text-muted-foreground">
                     沒有公司資料
                   </td>
                 </tr>

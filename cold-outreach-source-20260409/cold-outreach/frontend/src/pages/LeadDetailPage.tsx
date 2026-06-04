@@ -1028,6 +1028,7 @@ export default function LeadDetailPage() {
                 { label: '統編', key: 'tax_id' },
                 { label: '資本總額(元)', key: 'capital_amount' },
                 { label: '聯絡人', key: 'contact_name' },
+                { label: '部門', key: 'department' },
                 { label: '職稱', key: 'title' },
                 { label: 'Email', key: 'email' },
                 { label: '電話', key: 'phone' },

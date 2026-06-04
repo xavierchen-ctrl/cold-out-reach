@@ -166,6 +166,7 @@ function LeadDetail({
             {[
               { label: '公司', key: 'company_name' },
               { label: '聯絡人', key: 'contact_name' },
+              { label: '部門', key: 'department' },
               { label: '職稱', key: 'title' },
               { label: 'Email', key: 'email' },
               { label: '電話', key: 'phone' },
@@ -442,6 +443,7 @@ const SCRAPER_SOURCE_ICONS: Record<string, string> = {
   job_104: '💼',
   job_1111: '📋',
   real_estate_591: '🏠',
+  threads: '🧵',
   custom_url: '🔗',
 }
 

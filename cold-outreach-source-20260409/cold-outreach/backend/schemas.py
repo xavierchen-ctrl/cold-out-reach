@@ -42,6 +42,7 @@ class UserOut(BaseModel):
 class LeadCreate(BaseModel):
     company_name: str
     contact_name: Optional[str] = None
+    department: Optional[str] = None
     title: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -61,6 +62,7 @@ class LeadCreate(BaseModel):
 class LeadUpdate(BaseModel):
     company_name: Optional[str] = None
     contact_name: Optional[str] = None
+    department: Optional[str] = None
     title: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -86,6 +88,7 @@ class LeadOut(BaseModel):
     id: UUID
     company_name: str
     contact_name: Optional[str]
+    department: Optional[str] = None
     title: Optional[str]
     email: Optional[str]
     phone: Optional[str]
@@ -234,3 +237,4 @@ class ScraperJobOut(BaseModel):
 class ScraperImportRequest(BaseModel):
     assigned_to: Optional[UUID] = None
     email_only: Optional[bool] = False
+    indices: Optional[List[int]] = None

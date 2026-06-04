@@ -41,6 +41,7 @@ SOURCES = {
     "exhibition":      ("scrapers.exhibition",    "https://exh.taitra.org.tw"),
     "real_estate_591": ("scrapers.real_estate",   "https://newhouse.591.com.tw"),
     "ecommerce":       ("scrapers.ecommerce",     "shopee_search"),
+    "threads":         ("scrapers.threads",        "https://www.threads.net/search?q=數位行銷&serp_type=default"),
 }
 
 DEFAULT_URLS = {k: v[1] for k, v in SOURCES.items()}
@@ -235,16 +236,20 @@ def import_job(
     if body.email_only:
         companies = [c for c in companies if c.get("email")]
 
+    # 只匯入勾選的項目（前端傳入原始索引列表）
+    if body.indices is not None:
+        idx_set = set(body.indices)
+        companies = [c for i, c in enumerate(companies) if i in idx_set]
+
     created = 0
     skipped = 0
     for c in companies:
         name = c.get("company_name", "").strip()
         if not name:
             continue
-        # Dedup: skip if same company_name + source already exists
+        # Dedup: skip if same company_name already exists (regardless of source)
         existing = db.query(Lead).filter(
             Lead.company_name == name,
-            Lead.source == source_label,
         ).first()
         if existing:
             # 已存在：補填空白欄位（不覆蓋有值的）

@@ -109,8 +109,8 @@ export const runScraper = (source: string, url?: string, keyword?: string, indus
 export const getScraperJobs = () => api.get('/scraper/jobs')
 export const previewScraperJob = (jobId: string) =>
   api.get(`/scraper/preview/${jobId}`)
-export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean) =>
-  api.post(`/scraper/import/${jobId}`, { assigned_to, email_only })
+export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean, indices?: number[]) =>
+  api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
 
 // ── Templates ─────────────────────────────────────────────────────────────────
 export const getTemplates = () => api.get('/templates')
