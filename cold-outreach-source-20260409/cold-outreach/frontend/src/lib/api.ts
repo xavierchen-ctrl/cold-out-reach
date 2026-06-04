@@ -111,6 +111,10 @@ export const previewScraperJob = (jobId: string) =>
   api.get(`/scraper/preview/${jobId}`)
 export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean, indices?: number[]) =>
   api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
+export const findCompanyWebsite = (q: string) =>
+  api.get(`/scraper/find-website`, { params: { q } })
+export const updateScraperJobField = (jobId: string, index: number, field: string, value: string | null) =>
+  api.patch(`/scraper/jobs/${jobId}/update-field`, { index, field, value })
 
 // ── Templates ─────────────────────────────────────────────────────────────────
 export const getTemplates = () => api.get('/templates')

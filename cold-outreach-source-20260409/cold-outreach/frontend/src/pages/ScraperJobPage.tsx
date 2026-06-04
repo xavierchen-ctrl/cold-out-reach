@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, updateScraperJobField } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase } from 'lucide-react'
+import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2 } from 'lucide-react'
 
 interface ScrapedCompany {
   company_name: string
@@ -24,6 +24,7 @@ export default function ScraperJobPage() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
+  const [findingWebsite, setFindingWebsite] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     if (!id) return
@@ -61,6 +62,24 @@ export default function ScraperJobPage() {
   }
 
   const importCount = someSelected ? selectedIndices.size : companies.length
+
+  const handleFindWebsite = async (idx: number, companyName: string) => {
+    setFindingWebsite(prev => new Set(prev).add(idx))
+    try {
+      const res = await findCompanyWebsite(companyName)
+      const url: string | null = res.data.website
+      if (url) {
+        setCompanies(prev => prev.map((c, i) => i === idx ? { ...c, website: url } : c))
+        if (id) await updateScraperJobField(id, idx, 'website', url)
+      } else {
+        alert(`找不到「${companyName}」的官網`)
+      }
+    } catch {
+      alert('搜尋失敗，請稍後再試')
+    } finally {
+      setFindingWebsite(prev => { const s = new Set(prev); s.delete(idx); return s })
+    }
+  }
 
   const handleImport = async () => {
     if (!id) return
@@ -163,19 +182,28 @@ export default function ScraperJobPage() {
                       </div>
                     </td>
 
-                    <td className="py-2 px-4 hidden sm:table-cell">
+                    <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
                       {c.website ? (
                         <a
                           href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
                           target="_blank"
                           rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
                           className="text-blue-500 hover:underline text-xs break-all"
                         >
                           {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
                         </a>
+                      ) : findingWebsite.has(idx) ? (
+                        <span className="flex items-center gap-1 text-xs text-gray-400">
+                          <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
+                        </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
+                        <button
+                          onClick={() => handleFindWebsite(idx, c.company_name)}
+                          className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                          title="用 Google 搜尋官網"
+                        >
+                          <Search className="w-3 h-3" /> 查找網址
+                        </button>
                       )}
                     </td>
 

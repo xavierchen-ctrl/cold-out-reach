@@ -149,6 +149,89 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
 # ── API Endpoints ──────────────────────────────────────────────────────────────
 
 import os as _os
+import urllib.parse as _urlparse
+from bs4 import BeautifulSoup as _BS
+from pydantic import BaseModel as _BM
+from typing import Optional as _Opt
+
+
+class _JobFieldUpdate(_BM):
+    index: int
+    field: str
+    value: _Opt[str] = None
+
+
+_WEBSITE_BLACKLIST = {
+    'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'linkedin.com',
+    'youtube.com', 'threads.net', 'google.com', 'wikipedia.org', 'yahoo.com',
+    'line.me', 'tiktok.com', 'amazon.com', 'shopee.tw', 'shopee.com',
+}
+
+_SEARCH_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,*/*",
+}
+
+
+@router.get("/find-website")
+async def find_website_for_company(
+    q: str,
+    current_user: User = Depends(get_current_user),
+):
+    """根據公司名稱用 DuckDuckGo 搜尋官方網站"""
+    query = _urlparse.quote(q + " 官方網站")
+    found = None
+    try:
+        async with httpx.AsyncClient(
+            headers=_SEARCH_HEADERS, timeout=12, follow_redirects=True
+        ) as client:
+            resp = await client.get(
+                f"https://html.duckduckgo.com/html/?q={query}"
+            )
+            soup = _BS(resp.text, "lxml")
+            for a in soup.select("a.result__url"):
+                href = a.get("href", "")
+                # DuckDuckGo 包一層 redirect，抓 uddg= 參數
+                params = _urlparse.parse_qs(_urlparse.urlparse(href).query)
+                url = params.get("uddg", [""])[0]
+                if not url:
+                    text = a.get_text(strip=True)
+                    url = ("https://" + text) if text and not text.startswith("http") else text
+                if not url:
+                    continue
+                # 正規化
+                if not url.startswith("http"):
+                    url = "https://" + url
+                domain = _urlparse.urlparse(url).netloc.lower().lstrip("www.")
+                if domain and not any(bl in domain for bl in _WEBSITE_BLACKLIST):
+                    found = url
+                    break
+    except Exception as e:
+        logger.warning(f"find-website error for {q!r}: {e}")
+    return {"website": found}
+
+
+@router.patch("/jobs/{job_id}/update-field")
+def update_job_field(
+    job_id: UUID,
+    body: _JobFieldUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """更新 job result_json 中特定索引的欄位值（前端即時補資料用）"""
+    job = db.query(ScraperJob).filter(ScraperJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    companies = json.loads(job.result_json or "[]")
+    if 0 <= body.index < len(companies):
+        companies[body.index][body.field] = body.value
+        job.result_json = json.dumps(companies, ensure_ascii=False)
+        db.commit()
+    return {"ok": True}
 
 @router.get("/check-env")
 def check_env():
