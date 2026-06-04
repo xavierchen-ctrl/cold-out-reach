@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword } from '@/lib/api'
+import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail } from '@/lib/api'
 import { Tag, Webhook, WebhookLog, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Trash2, Plus, Globe, Tag as TagIcon, Bell, User, TestTube2, Zap, Users, Eye, EyeOff } from 'lucide-react'
+import { Trash2, Plus, Globe, Tag as TagIcon, Bell, User, TestTube2, Zap, Users, Eye, EyeOff, Mail, CheckCircle2, XCircle } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
 function PasswordInput({ value, onChange, placeholder, className }: {
@@ -854,6 +854,102 @@ function TeamsTab() {
   )
 }
 
+// ── Gmail Binding Card ────────────────────────────────────────────────────────
+function GmailBindingCard() {
+  const [connected, setConnected] = useState(false)
+  const [gmailEmail, setGmailEmail] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [disconnecting, setDisconnecting] = useState(false)
+
+  const loadStatus = async () => {
+    try {
+      const res = await getGmailStatus()
+      setConnected(res.data.connected)
+      setGmailEmail(res.data.email)
+    } catch {
+      setConnected(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStatus()
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'gmail-connected') {
+        setConnected(true)
+        setGmailEmail(e.data.email || null)
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [])
+
+  const handleConnect = async () => {
+    try {
+      const res = await getGmailAuthUrl()
+      window.open(res.data.auth_url, '_blank', 'width=520,height=620,noopener')
+    } catch {
+      alert('無法取得授權連結，請確認 Google OAuth 設定')
+    }
+  }
+
+  const handleDisconnect = async () => {
+    if (!confirm('確定要解除 Gmail 綁定嗎？')) return
+    setDisconnecting(true)
+    try {
+      await disconnectGmail()
+      setConnected(false)
+      setGmailEmail(null)
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  return (
+    <div className="bg-white border rounded-lg p-5 max-w-md">
+      <div className="flex items-center gap-2 mb-4">
+        <Mail className="w-4 h-4 text-gray-500" />
+        <h3 className="text-sm font-medium text-gray-700">Gmail 發信帳號</h3>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">載入中...</p>
+      ) : connected ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <div>
+              <p className="font-medium">已綁定</p>
+              {gmailEmail && <p className="text-xs text-emerald-600 mt-0.5">{gmailEmail}</p>}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleConnect}>重新授權</Button>
+            <Button variant="outline" size="sm" onClick={handleDisconnect} disabled={disconnecting}
+              className="text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200">
+              {disconnecting ? '解除中...' : '解除綁定'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+            <XCircle className="w-4 h-4 shrink-0" />
+            <span>尚未綁定 Gmail</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            綁定後即可直接從系統發送開發信，並追蹤回覆狀態。
+          </p>
+          <Button size="sm" onClick={handleConnect}>
+            <Mail className="w-3.5 h-3.5 mr-1.5" /> 綁定 Gmail
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Profile Tab ───────────────────────────────────────────────────────────────
 function ProfileTab() {
   const [currentPw, setCurrentPw] = useState('')
@@ -895,8 +991,12 @@ function ProfileTab() {
   }
 
   return (
-    <div>
-      <h2 className="text-lg font-semibold mb-4">個人資料</h2>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold mb-4">個人資料</h2>
+        <GmailBindingCard />
+      </div>
+      <div>
       <div className="bg-white border rounded-lg p-5 space-y-4 max-w-md">
         <h3 className="text-sm font-medium text-gray-700">更改密碼</h3>
         <div>
@@ -915,6 +1015,7 @@ function ProfileTab() {
         <Button onClick={handleChangePw} disabled={saving || !currentPw || !newPw || !confirmPw}>
           {saving ? '更新中...' : '更改密碼'}
         </Button>
+      </div>
       </div>
     </div>
   )

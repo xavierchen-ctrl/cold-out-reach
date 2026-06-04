@@ -59,6 +59,8 @@ export const createActivity = (leadId: string, data: Record<string, unknown>) =>
 
 // ── Gmail ─────────────────────────────────────────────────────────────────────
 export const getGmailAuthUrl = () => api.get('/gmail/auth')
+export const getGmailStatus = () => api.get('/gmail/status')
+export const disconnectGmail = () => api.delete('/gmail/disconnect')
 export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/send', data)
 
 // ── AI ────────────────────────────────────────────────────────────────────────
