@@ -344,7 +344,7 @@ async def generate_proposal(
 
     import asyncio
     genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
     data = None
     last_err = None
     for attempt in range(3):
