@@ -12,6 +12,7 @@ from utils import now_tw
 class UserRole(str, enum.Enum):
     admin = "admin"
     manager = "manager"
+    team_lead = "team_lead"
     sales = "sales"
 
 
