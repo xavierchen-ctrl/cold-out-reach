@@ -197,33 +197,42 @@ async def find_website_for_company(
     current_user: User = Depends(get_current_user),
 ):
     """根據公司名稱用 DuckDuckGo 搜尋官方網站"""
-    query = _urlparse.quote(q + " 官方網站")
+    import re as _re
+    # 英文名稱用英文搜尋詞，中文名稱用中文
+    is_english = bool(_re.match(r'^[A-Za-z0-9\s\.\,\-\&\(\)\/]+$', q.strip()))
+    candidates = (
+        [f"{q} official website", f"{q} taiwan", q]
+        if is_english else
+        [f"{q} 官方網站", f"{q} 官網", q]
+    )
+
     found = None
     try:
         async with httpx.AsyncClient(
-            headers=_SEARCH_HEADERS, timeout=12, follow_redirects=True
+            headers=_SEARCH_HEADERS, timeout=15, follow_redirects=True
         ) as client:
-            resp = await client.get(
-                f"https://html.duckduckgo.com/html/?q={query}"
-            )
-            soup = _BS(resp.text, "lxml")
-            for a in soup.select("a.result__url"):
-                href = a.get("href", "")
-                # DuckDuckGo 包一層 redirect，抓 uddg= 參數
-                params = _urlparse.parse_qs(_urlparse.urlparse(href).query)
-                url = params.get("uddg", [""])[0]
-                if not url:
-                    text = a.get_text(strip=True)
-                    url = ("https://" + text) if text and not text.startswith("http") else text
-                if not url:
-                    continue
-                # 正規化
-                if not url.startswith("http"):
-                    url = "https://" + url
-                domain = _urlparse.urlparse(url).netloc.lower().lstrip("www.")
-                if domain and not any(bl in domain for bl in _WEBSITE_BLACKLIST):
-                    found = url
+            for search_q in candidates:
+                if found:
                     break
+                resp = await client.get(
+                    f"https://html.duckduckgo.com/html/?q={_urlparse.quote(search_q)}"
+                )
+                soup = _BS(resp.text, "lxml")
+                for a in soup.select("a.result__url"):
+                    href = a.get("href", "")
+                    params = _urlparse.parse_qs(_urlparse.urlparse(href).query)
+                    url = params.get("uddg", [""])[0]
+                    if not url:
+                        text = a.get_text(strip=True)
+                        url = ("https://" + text) if text and not text.startswith("http") else text
+                    if not url:
+                        continue
+                    if not url.startswith("http"):
+                        url = "https://" + url
+                    domain = _urlparse.urlparse(url).netloc.lower().lstrip("www.")
+                    if domain and not any(bl in domain for bl in _WEBSITE_BLACKLIST):
+                        found = url
+                        break
     except Exception as e:
         logger.warning(f"find-website error for {q!r}: {e}")
     return {"website": found}
