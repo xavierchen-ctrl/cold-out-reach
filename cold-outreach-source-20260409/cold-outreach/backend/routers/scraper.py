@@ -42,6 +42,7 @@ SOURCES = {
     "real_estate_591": ("scrapers.real_estate",   "https://newhouse.591.com.tw"),
     "ecommerce":       ("scrapers.ecommerce",     "shopee_search"),
     "threads":         ("scrapers.threads",        "https://www.threads.net/search?q=數位行銷&serp_type=default"),
+    "threads_posts":   ("scrapers.threads",        "https://www.threads.net/search?q=數位行銷&serp_type=posts"),
 }
 
 DEFAULT_URLS = {k: v[1] for k, v in SOURCES.items()}

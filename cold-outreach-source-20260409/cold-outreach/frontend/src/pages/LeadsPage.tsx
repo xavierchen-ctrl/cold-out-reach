@@ -444,6 +444,7 @@ const SCRAPER_SOURCE_ICONS: Record<string, string> = {
   job_1111: '📋',
   real_estate_591: '🏠',
   threads: '🧵',
+  threads_posts: '📝',
   custom_url: '🔗',
 }
 

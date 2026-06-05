@@ -13,6 +13,11 @@ interface ScrapedCompany {
   city?: string
   industry?: string
   website?: string
+  // Threads 貼文模式專屬欄位
+  post_text?: string
+  likes?: number
+  reposts?: number
+  replies?: number
 }
 
 export default function ScraperJobPage() {
@@ -99,6 +104,7 @@ export default function ScraperJobPage() {
   if (loading) return <div className="flex p-8 items-center justify-center text-muted-foreground">載入中...</div>
   if (error) return <div className="p-8 text-destructive">{error}</div>
 
+  const isPostsMode = companies.length > 0 && companies[0].post_text !== undefined
   const withEmailCount = companies.filter(c => c.email).length
   const withPhoneCount = companies.filter(c => c.phone).length
 
@@ -144,12 +150,25 @@ export default function ScraperJobPage() {
                   />
                 </th>
                 <th className="py-3 px-4 text-center text-gray-400 w-10">#</th>
-                <th className="py-3 px-4">公司資訊</th>
-                <th className="py-3 px-4 hidden sm:table-cell w-48">網址</th>
-                <th className="py-3 px-4">聯絡人</th>
-                <th className="py-3 px-4 hidden md:table-cell w-36">地理/產業</th>
-                <th className="py-3 px-4 hidden lg:table-cell w-40">電話</th>
-                <th className="py-3 px-4 hidden lg:table-cell w-48">Email</th>
+                {isPostsMode ? (
+                  <>
+                    <th className="py-3 px-4">作者</th>
+                    <th className="py-3 px-4">貼文內容</th>
+                    <th className="py-3 px-4 w-24 text-center">👍 讚數</th>
+                    <th className="py-3 px-4 w-24 text-center">🔁 轉發</th>
+                    <th className="py-3 px-4 w-24 text-center">💬 留言</th>
+                    <th className="py-3 px-4 hidden sm:table-cell w-36">貼文連結</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="py-3 px-4">公司資訊</th>
+                    <th className="py-3 px-4 hidden sm:table-cell w-48">網址</th>
+                    <th className="py-3 px-4">聯絡人</th>
+                    <th className="py-3 px-4 hidden md:table-cell w-36">地理/產業</th>
+                    <th className="py-3 px-4 hidden lg:table-cell w-40">電話</th>
+                    <th className="py-3 px-4 hidden lg:table-cell w-48">Email</th>
+                  </>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -172,96 +191,144 @@ export default function ScraperJobPage() {
 
                     <td className="py-4 px-4 text-center text-xs text-gray-400">{idx + 1}</td>
 
-                    <td className="py-2 px-4">
-                      <div className="flex items-start gap-2">
-                        <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
-                        <div>
-                          <div className="font-semibold text-gray-900 leading-tight">{c.company_name}</div>
-                          {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}
-                        </div>
-                      </div>
-                    </td>
-
-                    <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
-                      {c.website ? (
-                        <a
-                          href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-500 hover:underline text-xs break-all"
-                        >
-                          {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
-                        </a>
-                      ) : findingWebsite.has(idx) ? (
-                        <span className="flex items-center gap-1 text-xs text-gray-400">
-                          <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => handleFindWebsite(idx, c.company_name)}
-                          className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
-                          title="用 Google 搜尋官網"
-                        >
-                          <Search className="w-3 h-3" /> 查找網址
-                        </button>
-                      )}
-                    </td>
-
-                    <td className="py-2 px-4">
-                      {c.contact_name ? (
-                        <div className="flex items-start gap-2">
-                          <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                          <div>
-                            <p className="font-medium text-gray-800">{c.contact_name}</p>
-                            {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
+                    {isPostsMode ? (
+                      <>
+                        {/* 作者欄 */}
+                        <td className="py-2 px-4 w-36">
+                          <div className="flex items-start gap-1.5">
+                            <UserCircle2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
+                            <div>
+                              <div className="font-semibold text-gray-900 leading-tight text-sm">{c.company_name}</div>
+                              <div className="text-xs text-gray-500">{c.contact_name}</div>
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-400 italic">— 無 —</span>
-                      )}
-                    </td>
-
-                    <td className="py-2 px-4 hidden md:table-cell">
-                      <div className="space-y-1">
-                        {c.industry && (
-                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <Briefcase className="w-3.5 h-3.5" /> {c.industry}
+                        </td>
+                        {/* 貼文內容 */}
+                        <td className="py-2 px-4 max-w-xs">
+                          <p className="text-xs text-gray-700 line-clamp-3 leading-relaxed whitespace-pre-wrap">
+                            {c.post_text || <span className="text-gray-300 italic">（無內容）</span>}
+                          </p>
+                        </td>
+                        {/* 讚數 */}
+                        <td className="py-2 px-4 text-center">
+                          <span className="text-sm font-medium text-rose-600">{c.likes ?? 0}</span>
+                        </td>
+                        {/* 轉發數 */}
+                        <td className="py-2 px-4 text-center">
+                          <span className="text-sm font-medium text-green-600">{c.reposts ?? 0}</span>
+                        </td>
+                        {/* 留言數 */}
+                        <td className="py-2 px-4 text-center">
+                          <span className="text-sm font-medium text-blue-600">{c.replies ?? 0}</span>
+                        </td>
+                        {/* 貼文連結 */}
+                        <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
+                          {c.website ? (
+                            <a
+                              href={c.website}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs text-indigo-500 hover:underline"
+                            >
+                              查看貼文 ↗
+                            </a>
+                          ) : <span className="text-xs text-gray-300">—</span>}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="py-2 px-4">
+                          <div className="flex items-start gap-2">
+                            <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
+                            <div>
+                              <div className="font-semibold text-gray-900 leading-tight">{c.company_name}</div>
+                              {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}
+                            </div>
                           </div>
-                        )}
-                        {c.city && (
-                          <div className="flex items-center gap-1.5 text-xs text-gray-600">
-                            <MapPin className="w-3.5 h-3.5" /> {c.city}
+                        </td>
+
+                        <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
+                          {c.website ? (
+                            <a
+                              href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-500 hover:underline text-xs break-all"
+                            >
+                              {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
+                            </a>
+                          ) : findingWebsite.has(idx) ? (
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                              <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleFindWebsite(idx, c.company_name)}
+                              className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                              title="用 Google 搜尋官網"
+                            >
+                              <Search className="w-3 h-3" /> 查找網址
+                            </button>
+                          )}
+                        </td>
+
+                        <td className="py-2 px-4">
+                          {c.contact_name ? (
+                            <div className="flex items-start gap-2">
+                              <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                              <div>
+                                <p className="font-medium text-gray-800">{c.contact_name}</p>
+                                {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">— 無 —</span>
+                          )}
+                        </td>
+
+                        <td className="py-2 px-4 hidden md:table-cell">
+                          <div className="space-y-1">
+                            {c.industry && (
+                              <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                <Briefcase className="w-3.5 h-3.5" /> {c.industry}
+                              </div>
+                            )}
+                            {c.city && (
+                              <div className="flex items-center gap-1.5 text-xs text-gray-600">
+                                <MapPin className="w-3.5 h-3.5" /> {c.city}
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    </td>
+                        </td>
 
-                    <td className="py-2 px-4 hidden lg:table-cell">
-                      {c.phone ? (
-                        <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
-                          <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
+                        <td className="py-2 px-4 hidden lg:table-cell">
+                          {c.phone ? (
+                            <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
+                              <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
 
-                    <td className="py-2 px-4 hidden lg:table-cell">
-                      {c.email ? (
-                        <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
-                          <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-gray-300">—</span>
-                      )}
-                    </td>
+                        <td className="py-2 px-4 hidden lg:table-cell">
+                          {c.email ? (
+                            <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
+                              <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                      </>
+                    )}
                   </tr>
                 )
               })}
               {companies.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-12 text-center text-muted-foreground">
-                    沒有公司資料
+                    沒有資料
                   </td>
                 </tr>
               )}

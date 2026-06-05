@@ -220,6 +220,133 @@ async def _scrape_with_playwright(url: str, keyword: str, limit: int) -> List[di
     return results
 
 
+async def _scrape_posts_with_playwright(url: str, limit: int) -> List[dict]:
+    """爬取 Threads 貼文搜尋結果（serp_type=posts），含讚數/轉發/留言"""
+    results = []
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True, args=_PW_LAUNCH_ARGS)
+            ctx = await browser.new_context(
+                user_agent=_HEADERS["User-Agent"],
+                locale="zh-TW",
+                viewport={"width": 1280, "height": 900},
+                ignore_https_errors=True,
+            )
+            page = await ctx.new_page()
+
+            logger.info(f"Threads posts: loading {url}")
+            try:
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await page.wait_for_timeout(5000)
+            except Exception as e:
+                logger.warning(f"Threads posts: page load error: {e}")
+                await browser.close()
+                return []
+
+            # 滾動載入更多貼文
+            for _ in range(6):
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                await page.wait_for_timeout(2000)
+
+            posts = await page.evaluate("""
+                () => {
+                    const results = [];
+                    const seen = new Set();
+
+                    // 嘗試 article 或 role="article"
+                    const containers = Array.from(document.querySelectorAll('article, [role="article"]'));
+
+                    for (const container of containers) {
+                        try {
+                            // 作者連結 /@username
+                            const authorLink = container.querySelector('a[href^="/@"]');
+                            if (!authorLink) continue;
+
+                            const href = authorLink.getAttribute('href') || '';
+                            const username = href.replace(/^\\/@/, '').split('/')[0].split('?')[0];
+                            if (!username) continue;
+
+                            // 去重（用前20字元）
+                            const dedup = username + '|' + (container.textContent || '').substring(0, 30);
+                            if (seen.has(dedup)) continue;
+                            seen.add(dedup);
+
+                            // 顯示名稱
+                            let displayName = username;
+                            const nameSpan = authorLink.querySelector('span');
+                            if (nameSpan && nameSpan.textContent) displayName = nameSpan.textContent.trim();
+
+                            // 貼文內容：找最長的非UI文字
+                            let postText = '';
+                            let maxLen = 0;
+                            const textEls = container.querySelectorAll('span, p');
+                            for (const el of textEls) {
+                                const t = (el.textContent || '').trim();
+                                if (t.length > maxLen && t.length > 15 && el.childElementCount < 4) {
+                                    if (!/^[\\d\\s.,·]+$/.test(t) && !t.startsWith('@')) {
+                                        maxLen = t.length;
+                                        postText = t;
+                                    }
+                                }
+                            }
+
+                            // 互動數：嘗試 aria-label
+                            let likes = 0, reposts = 0, replies = 0;
+                            const btns = container.querySelectorAll('[aria-label]');
+                            for (const btn of btns) {
+                                const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+                                const numMatch = label.match(/(\\d[\\d,]*)/);
+                                const num = numMatch ? parseInt(numMatch[1].replace(/,/g, '')) : 0;
+                                if (label.includes('like') || label.includes('讚')) likes = num;
+                                else if (label.includes('repost') || label.includes('轉發') || label.includes('rethread')) reposts = num;
+                                else if (label.includes('repl') || label.includes('留言') || label.includes('comment')) replies = num;
+                            }
+
+                            // 貼文直連
+                            let postUrl = '';
+                            const postLink = container.querySelector('a[href*="/post/"]');
+                            if (postLink) postUrl = 'https://www.threads.net' + postLink.getAttribute('href');
+
+                            results.push({ username, displayName, postText: postText.substring(0, 600), likes, reposts, replies, postUrl });
+                        } catch(e) {}
+                    }
+                    return results;
+                }
+            """)
+
+            await browser.close()
+            logger.info(f"Threads posts: extracted {len(posts)} posts")
+
+            for post in posts[:limit]:
+                username = post.get('username', '')
+                post_text = post.get('postText', '')
+                post_url = post.get('postUrl') or f"https://www.threads.net/@{username}"
+                results.append({
+                    "company_name": post.get('displayName') or username,
+                    "contact_name": f"@{username}",
+                    "email": None,
+                    "phone": None,
+                    "website": post_url,
+                    "industry": None,
+                    "city": None,
+                    "company_size": None,
+                    "title": None,
+                    "source": "threads_posts",
+                    "source_url": post_url,
+                    "post_text": post_text,
+                    "likes": post.get('likes', 0),
+                    "reposts": post.get('reposts', 0),
+                    "replies": post.get('replies', 0),
+                    "notes": post_text[:300] if post_text else None,
+                })
+
+    except Exception as e:
+        logger.error(f"Threads posts scraper error: {e}")
+
+    return results
+
+
 async def scrape(url: str, keyword: str = None, industry: str = None, limit: int = 20, **kwargs) -> List[dict]:
     """
     搜尋 Threads 帳號並回傳聯絡資訊。
@@ -239,15 +366,24 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
     # keyword 優先覆蓋 URL 中的 q 參數
     if keyword:
+        # 保留現有的 serp_type
+        serp_type = "posts" if "serp_type=posts" in search_url else "default"
         search_url = re.sub(r"[?&]q=[^&]*", "", search_url)
         sep = "&" if "?" in search_url else "?"
-        search_url = f"{search_url}{sep}q={keyword}&serp_type=default"
+        search_url = f"{search_url}{sep}q={keyword}&serp_type={serp_type}"
 
-    logger.info(f"Threads scrape: url={search_url}, limit={lim}")
-    results = await _scrape_with_playwright(search_url, keyword or "", lim)
+    # 貼文模式 (serp_type=posts)
+    is_posts_mode = "serp_type=posts" in search_url
 
-    # keyword / industry 篩選（寬鬆：有就過，沒有就全部保留）
-    if keyword and results:
+    if is_posts_mode:
+        logger.info(f"Threads posts mode: url={search_url}, limit={lim}")
+        results = await _scrape_posts_with_playwright(search_url, lim)
+    else:
+        logger.info(f"Threads accounts mode: url={search_url}, limit={lim}")
+        results = await _scrape_with_playwright(search_url, keyword or "", lim)
+
+    # 帳號模式才做 keyword 篩選（貼文模式搜尋結果本身就已過濾）
+    if not is_posts_mode and keyword and results:
         kw_lower = keyword.lower()
         filtered = [
             r for r in results
