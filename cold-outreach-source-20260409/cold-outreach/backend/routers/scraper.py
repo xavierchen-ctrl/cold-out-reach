@@ -191,50 +191,93 @@ _SEARCH_HEADERS = {
 }
 
 
+def _is_good_url(url: str) -> bool:
+    if not url or not url.startswith("http"):
+        return False
+    domain = _urlparse.urlparse(url).netloc.lower().lstrip("www.")
+    return bool(domain) and not any(bl in domain for bl in _WEBSITE_BLACKLIST)
+
+
+async def _search_ddg(client, query: str) -> _Opt[str]:
+    """DuckDuckGo HTML 搜尋，回傳第一個合法網址"""
+    resp = await client.get(
+        f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
+        timeout=12,
+    )
+    soup = _BS(resp.text, "lxml")
+    for a in soup.select("a.result__url"):
+        href = a.get("href", "")
+        params = _urlparse.parse_qs(_urlparse.urlparse(href).query)
+        url = params.get("uddg", [""])[0]
+        if not url:
+            text = a.get_text(strip=True)
+            url = ("https://" + text) if text and not text.startswith("http") else text
+        if not url.startswith("http"):
+            url = "https://" + url
+        if _is_good_url(url):
+            return url
+    return None
+
+
+async def _search_bing(client, query: str) -> _Opt[str]:
+    """Bing 搜尋備援，回傳第一個合法網址"""
+    resp = await client.get(
+        f"https://www.bing.com/search?q={_urlparse.quote(query)}",
+        timeout=12,
+    )
+    soup = _BS(resp.text, "lxml")
+    for a in soup.select("li.b_algo h2 a, li.b_algo .b_title a"):
+        url = a.get("href", "")
+        if _is_good_url(url):
+            return url
+    return None
+
+
 @router.get("/find-website")
 async def find_website_for_company(
     q: str,
     current_user: User = Depends(get_current_user),
 ):
-    """根據公司名稱用 DuckDuckGo 搜尋官方網站"""
+    """根據公司名稱搜尋官方網站（DuckDuckGo → Bing 備援）"""
     import re as _re
-    # 英文名稱用英文搜尋詞，中文名稱用中文
+
     is_english = bool(_re.match(r'^[A-Za-z0-9\s\.\,\-\&\(\)\/]+$', q.strip()))
-    candidates = (
-        [f"{q} official website", f"{q} taiwan", q]
-        if is_english else
-        [f"{q} 官方網站", f"{q} 官網", q]
-    )
+
+    # 清理後綴（CO., LTD. 等），保留核心品牌名
+    clean_q = _re.sub(
+        r'\b(CO\.?,?\s*LTD\.?|INC\.?|CORP\.?|LLC\.?|LIMITED|CORPORATION|COMPANY)\s*$',
+        '', q, flags=_re.IGNORECASE,
+    ).strip(' ,.')
+
+    if is_english:
+        candidates = [
+            f"{clean_q} official website",
+            f"{clean_q} taiwan",
+            f"{q} official website",
+        ]
+    else:
+        candidates = [f"{q} 官方網站", f"{q} 官網", q]
 
     found = None
     try:
         async with httpx.AsyncClient(
-            headers=_SEARCH_HEADERS, timeout=15, follow_redirects=True
+            headers=_SEARCH_HEADERS, follow_redirects=True
         ) as client:
+            # 先試 DuckDuckGo
             for search_q in candidates:
+                found = await _search_ddg(client, search_q)
                 if found:
                     break
-                resp = await client.get(
-                    f"https://html.duckduckgo.com/html/?q={_urlparse.quote(search_q)}"
-                )
-                soup = _BS(resp.text, "lxml")
-                for a in soup.select("a.result__url"):
-                    href = a.get("href", "")
-                    params = _urlparse.parse_qs(_urlparse.urlparse(href).query)
-                    url = params.get("uddg", [""])[0]
-                    if not url:
-                        text = a.get_text(strip=True)
-                        url = ("https://" + text) if text and not text.startswith("http") else text
-                    if not url:
-                        continue
-                    if not url.startswith("http"):
-                        url = "https://" + url
-                    domain = _urlparse.urlparse(url).netloc.lower().lstrip("www.")
-                    if domain and not any(bl in domain for bl in _WEBSITE_BLACKLIST):
-                        found = url
+
+            # DuckDuckGo 失敗 → 試 Bing
+            if not found:
+                for search_q in candidates:
+                    found = await _search_bing(client, search_q)
+                    if found:
                         break
     except Exception as e:
         logger.warning(f"find-website error for {q!r}: {e}")
+
     return {"website": found}
 
 
