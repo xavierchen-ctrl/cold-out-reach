@@ -557,8 +557,20 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
             <Label>關鍵字 <span className="text-muted-foreground font-normal">（自訂搜尋詞）</span></Label>
             <Input
               value={keyword}
-              onChange={e => setKeyword(e.target.value)}
-              placeholder={source === 'lusha' ? '例：benq.com, 91app.com（domain）或 BenQ, 誠品（公司名）' : source === 'custom_url' ? '篩選關鍵字（可空白）' : '例：電商、品牌行銷、SEO'}
+              onChange={e => {
+                const kw = e.target.value
+                setKeyword(kw)
+                // 自動把關鍵字填入 URL 的 q=/keyword=/ks= 參數
+                setUrl(prev => {
+                  if (!prev) return prev
+                  if (kw) {
+                    return prev.replace(/([?&](?:q|keyword|ks)=)[^&]*/g, `$1${encodeURIComponent(kw)}`)
+                  } else {
+                    return SCRAPER_DEFAULT_URLS[source] || prev
+                  }
+                })
+              }}
+              placeholder={source === 'lusha' ? '例：benq.com, 91app.com（domain）或 BenQ, 誠品（公司名）' : source === 'custom_url' ? '篩選關鍵字（可空白）' : '例：DAZN、數位行銷、SEO'}
               className="mt-1"
             />
           </div>
