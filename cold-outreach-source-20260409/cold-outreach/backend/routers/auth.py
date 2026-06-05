@@ -171,6 +171,38 @@ def change_password(
     return {"message": "密碼已更新"}
 
 
+class ThreadsCookieBody(BaseModel):
+    session_id: str
+
+
+@router.post("/me/threads-cookie")
+def save_threads_cookie(
+    body: ThreadsCookieBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """儲存使用者的 Threads sessionid cookie"""
+    current_user.threads_cookie = body.session_id.strip()
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/me/threads-cookie")
+def get_threads_cookie_status(current_user: User = Depends(get_current_user)):
+    """回傳 Threads cookie 是否已設定"""
+    return {"connected": bool(current_user.threads_cookie)}
+
+
+@router.delete("/me/threads-cookie")
+def delete_threads_cookie(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    current_user.threads_cookie = None
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: str,

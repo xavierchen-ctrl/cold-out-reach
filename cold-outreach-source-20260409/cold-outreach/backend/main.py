@@ -135,6 +135,7 @@ async def lifespan(app: FastAPI):
                 )
             """))
             conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS team_id UUID REFERENCES teams(id)"))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS threads_cookie TEXT"))
             conn.commit()
     except Exception as e:
         print(f"Migration skip: {e}")

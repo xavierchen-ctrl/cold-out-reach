@@ -220,7 +220,7 @@ async def _scrape_with_playwright(url: str, keyword: str, limit: int) -> List[di
     return results
 
 
-async def _scrape_posts_with_playwright(url: str, limit: int) -> List[dict]:
+async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: str = None) -> List[dict]:
     """爬取 Threads 貼文搜尋結果（serp_type=posts），含讚數/轉發/留言"""
     results = []
     try:
@@ -250,6 +250,18 @@ async def _scrape_posts_with_playwright(url: str, limit: int) -> List[dict]:
                     "Sec-Fetch-User": "?1",
                 },
             )
+            # 注入 sessionid cookie（如果使用者有設定）
+            if session_cookie:
+                await ctx.add_cookies([{
+                    "name": "sessionid",
+                    "value": session_cookie.strip(),
+                    "domain": ".threads.net",
+                    "path": "/",
+                    "httpOnly": True,
+                    "secure": True,
+                }])
+                logger.info("Threads posts: sessionid cookie injected")
+
             page = await ctx.new_page()
 
             # 隱藏 webdriver 特徵（反 bot 偵測）
@@ -262,12 +274,13 @@ async def _scrape_posts_with_playwright(url: str, limit: int) -> List[dict]:
             """)
 
             logger.info(f"Threads posts: loading {url}")
-            # 先造訪首頁讓瀏覽器建立 cookie/session
-            try:
-                await page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=15000)
-                await page.wait_for_timeout(2000)
-            except Exception:
-                pass
+            # 未登入時先造訪首頁建立 session；已有 cookie 時直接去搜尋頁
+            if not session_cookie:
+                try:
+                    await page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=15000)
+                    await page.wait_for_timeout(2000)
+                except Exception:
+                    pass
 
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
@@ -467,7 +480,7 @@ def _collect_posts_from_json(obj, out: list, depth: int = 0):
             _collect_posts_from_json(item, out, depth + 1)
 
 
-async def scrape(url: str, keyword: str = None, industry: str = None, limit: int = 20, **kwargs) -> List[dict]:
+async def scrape(url: str, keyword: str = None, industry: str = None, limit: int = 20, cookies_str: str = None, **kwargs) -> List[dict]:
     """
     搜尋 Threads 帳號並回傳聯絡資訊。
     url: Threads 搜尋 URL，如 https://www.threads.net/search?q=數位行銷&serp_type=default
@@ -496,8 +509,8 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
     is_posts_mode = "serp_type=posts" in search_url
 
     if is_posts_mode:
-        logger.info(f"Threads posts mode: url={search_url}, limit={lim}")
-        results = await _scrape_posts_with_playwright(search_url, lim)
+        logger.info(f"Threads posts mode: url={search_url}, limit={lim}, has_cookie={bool(cookies_str)}")
+        results = await _scrape_posts_with_playwright(search_url, lim, session_cookie=cookies_str)
     else:
         logger.info(f"Threads accounts mode: url={search_url}, limit={lim}")
         results = await _scrape_with_playwright(search_url, keyword or "", lim)

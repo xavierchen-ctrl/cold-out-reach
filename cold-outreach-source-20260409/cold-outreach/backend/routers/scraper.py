@@ -72,11 +72,14 @@ def _deduplicate(companies: List[ScrapedCompany]) -> List[ScrapedCompany]:
 
 
 
-async def _run_scrape_module(source: str, url: str, keyword: str = None, industry: str = None, limit: int = 100) -> List[dict]:
+async def _run_scrape_module(source: str, url: str, keyword: str = None, industry: str = None, limit: int = 100, threads_cookie: str = None) -> List[dict]:
     """動態 import scrapers/ 模組並呼叫 scrape(url)"""
     module_path = SOURCES[source][0]
     module = importlib.import_module(module_path)
-    result = await module.scrape(url, keyword=keyword, industry=industry, limit=limit)
+    extra = {}
+    if threads_cookie and source in ("threads", "threads_posts"):
+        extra["cookies_str"] = threads_cookie
+    result = await module.scrape(url, keyword=keyword, industry=industry, limit=limit, **extra)
     # 統一格式：確保必要欄位存在
     normalized = []
     for item in result:
@@ -101,7 +104,7 @@ async def _run_scrape_module(source: str, url: str, keyword: str = None, industr
 SCRAPE_TIMEOUT_SECONDS = 600  # 10 分鐘上限
 
 
-async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, industry: str = None, limit: int = 100):
+async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, industry: str = None, limit: int = 100, threads_cookie: str = None):
     db = SessionLocal()
     try:
         job = db.query(ScraperJob).filter(ScraperJob.id == job_id).first()
@@ -113,7 +116,7 @@ async def _run_scrape(job_id: str, source: str, url: str, keyword: str = None, i
 
         try:
             companies_dicts = await asyncio.wait_for(
-                _run_scrape_module(source, url, keyword=keyword, industry=industry, limit=limit),
+                _run_scrape_module(source, url, keyword=keyword, industry=industry, limit=limit, threads_cookie=threads_cookie),
                 timeout=SCRAPE_TIMEOUT_SECONDS,
             )
             job.result_json = json.dumps(companies_dicts, ensure_ascii=False)
@@ -268,9 +271,10 @@ async def run_scrape(
     db.refresh(job)
 
     job_id = str(job.id)
+    threads_cookie = current_user.threads_cookie if body.source in ("threads", "threads_posts") else None
     asyncio.create_task(_run_scrape(job_id, body.source, url,
                                     keyword=body.keyword, industry=body.industry,
-                                    limit=body.limit or 100))
+                                    limit=body.limit or 100, threads_cookie=threads_cookie))
 
     return _job_to_out(job)
 

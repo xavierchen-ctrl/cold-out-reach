@@ -62,6 +62,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.sales)
     gmail_token = Column(Text, nullable=True)
+    threads_cookie = Column(Text, nullable=True)
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
     created_at = Column(DateTime, default=now_tw)
 
