@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail } from '@/lib/api'
+import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail, getThreadsCookieStatus, saveThreadsCookie, deleteThreadsCookie } from '@/lib/api'
 import { Tag, Webhook, WebhookLog, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -959,9 +959,8 @@ function ThreadsCookieCard() {
   const [show, setShow] = useState(false)
 
   useEffect(() => {
-    fetch('/api/auth/me/threads-cookie', { credentials: 'include' })
-      .then(r => r.json())
-      .then(d => setConnected(d.connected))
+    getThreadsCookieStatus()
+      .then(r => setConnected(r.data.connected))
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
@@ -970,17 +969,10 @@ function ThreadsCookieCard() {
     if (!inputVal.trim()) return
     setSaving(true)
     try {
-      const res = await fetch('/api/auth/me/threads-cookie', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: inputVal.trim() }),
-      })
-      if (res.ok) {
-        setConnected(true)
-        setInputVal('')
-        alert('✅ Threads Cookie 已儲存，下次爬蟲將以登入狀態執行')
-      }
+      await saveThreadsCookie(inputVal.trim())
+      setConnected(true)
+      setInputVal('')
+      alert('✅ Threads Cookie 已儲存，下次爬蟲將以登入狀態執行')
     } catch {
       alert('儲存失敗')
     } finally {
@@ -990,7 +982,7 @@ function ThreadsCookieCard() {
 
   const handleClear = async () => {
     if (!confirm('確定要清除 Threads Cookie 嗎？')) return
-    await fetch('/api/auth/me/threads-cookie', { method: 'DELETE', credentials: 'include' })
+    await deleteThreadsCookie()
     setConnected(false)
   }
 

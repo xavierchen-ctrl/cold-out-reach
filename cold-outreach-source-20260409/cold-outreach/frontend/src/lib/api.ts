@@ -61,6 +61,9 @@ export const createActivity = (leadId: string, data: Record<string, unknown>) =>
 export const getGmailAuthUrl = () => api.get('/gmail/auth')
 export const getGmailStatus = () => api.get('/gmail/status')
 export const disconnectGmail = () => api.delete('/gmail/disconnect')
+export const getThreadsCookieStatus = () => api.get('/auth/me/threads-cookie')
+export const saveThreadsCookie = (session_id: string) => api.post('/auth/me/threads-cookie', { session_id })
+export const deleteThreadsCookie = () => api.delete('/auth/me/threads-cookie')
 export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/send', data)
 
 // ── AI ────────────────────────────────────────────────────────────────────────
