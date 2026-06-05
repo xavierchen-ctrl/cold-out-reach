@@ -179,6 +179,9 @@ _WEBSITE_BLACKLIST = {
     'businessgo.com.tw', 'gcis.nat.gov.tw', 'findbiz.nat.gov.tw',
     'company.g0v.tw', 'moeaic.gov.tw', 'findcompany.com.tw',
     'twincn.com', 'tycns.com.tw', 'bizopen.moeaic.gov.tw',
+    # 產業公會 / 協會目錄
+    'icaa.org.tw', 'icaa.tw', 'tca.org.tw', 'teema.org.tw',
+    'taitra.org.tw', 'taiwantrade.com', 'taiwantrade.com.tw',
 }
 
 _SEARCH_HEADERS = {
