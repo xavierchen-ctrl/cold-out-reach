@@ -172,6 +172,12 @@ _WEBSITE_BLACKLIST = {
     'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'linkedin.com',
     'youtube.com', 'threads.net', 'google.com', 'wikipedia.org', 'yahoo.com',
     'line.me', 'tiktok.com', 'amazon.com', 'shopee.tw', 'shopee.com',
+    # 求職網站
+    '104.com.tw', '1111.com.tw', '518.com.tw', 'yes123.com.tw',
+    'cake.me', 'cakeresume.com', 'yourator.co', 'jobs.com.tw',
+    # 商業資料庫
+    'businessgo.com.tw', 'gcis.nat.gov.tw', 'findbiz.nat.gov.tw',
+    'company.g0v.tw', 'moeaic.gov.tw',
 }
 
 _SEARCH_HEADERS = {
