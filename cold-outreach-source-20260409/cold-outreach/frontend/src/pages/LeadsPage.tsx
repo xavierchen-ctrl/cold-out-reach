@@ -444,6 +444,7 @@ const SCRAPER_SOURCE_ICONS: Record<string, string> = {
   job_104: '💼',
   job_1111: '📋',
   real_estate_591: '🏠',
+  gemini_search: '🔍',
   custom_url: '🔗',
 }
 
@@ -540,36 +541,54 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
               </SelectContent>
             </Select>
           </div>
+          {source !== 'gemini_search' && (
+            <div>
+              <Label>目標 URL</Label>
+              <Input
+                value={url}
+                onChange={e => setUrl(e.target.value)}
+                className="mt-1 text-xs"
+                placeholder={source === 'custom_url' ? 'https://www.computex.biz/exhibitors' : ''}
+              />
+              {source === 'custom_url' && (
+                <p className="text-xs text-muted-foreground mt-1">請輸入目標網頁 URL（如會展官網、公會名單），AI 自動提取公司名單</p>
+              )}
+            </div>
+          )}
           <div>
-            <Label>目標 URL</Label>
-            <Input
-              value={url}
-              onChange={e => setUrl(e.target.value)}
-              className="mt-1 text-xs"
-              placeholder={source === 'custom_url' ? 'https://www.computex.biz/exhibitors' : ''}
-            />
-            {source === 'custom_url' && (
-              <p className="text-xs text-muted-foreground mt-1">請輸入目標網頁 URL（如會展官網、公會名單），AI 自動提取公司名單</p>
+            <Label>
+              {source === 'gemini_search' ? '搜尋指令' : '關鍵字'}
+              <span className="text-muted-foreground font-normal ml-1">
+                {source === 'gemini_search' ? '（用自然語言描述你要找的對象）' : '（自訂搜尋詞）'}
+              </span>
+            </Label>
+            {source === 'gemini_search' && (
+              <p className="text-xs text-muted-foreground mt-1 mb-1">
+                例：「台灣美妝品牌 有618活動」、「有投放關鍵字廣告的保養品牌」、「美妝 YouTube 頻道 訂閱數高」
+              </p>
             )}
-          </div>
-          <div>
-            <Label>關鍵字 <span className="text-muted-foreground font-normal">（自訂搜尋詞）</span></Label>
             <Input
               value={keyword}
               onChange={e => {
                 const kw = e.target.value
                 setKeyword(kw)
-                // 自動把關鍵字填入 URL 的 q=/keyword=/ks= 參數
-                setUrl(prev => {
-                  if (!prev) return prev
-                  if (kw) {
-                    return prev.replace(/([?&](?:q|keyword|ks)=)[^&]*/g, `$1${encodeURIComponent(kw)}`)
-                  } else {
-                    return SCRAPER_DEFAULT_URLS[source] || prev
-                  }
-                })
+                if (source !== 'gemini_search') {
+                  setUrl(prev => {
+                    if (!prev) return prev
+                    if (kw) {
+                      return prev.replace(/([?&](?:q|keyword|ks)=)[^&]*/g, `$1${encodeURIComponent(kw)}`)
+                    } else {
+                      return SCRAPER_DEFAULT_URLS[source] || prev
+                    }
+                  })
+                }
               }}
-              placeholder={source === 'lusha' ? '例：benq.com, 91app.com（domain）或 BenQ, 誠品（公司名）' : source === 'custom_url' ? '篩選關鍵字（可空白）' : '例：DAZN、數位行銷、SEO'}
+              placeholder={
+                source === 'gemini_search' ? '美妝品牌 618促銷活動' :
+                source === 'lusha' ? '例：benq.com, 91app.com（domain）或 BenQ, 誠品（公司名）' :
+                source === 'custom_url' ? '篩選關鍵字（可空白）' :
+                '例：DAZN、數位行銷、SEO'
+              }
               className="mt-1"
             />
           </div>

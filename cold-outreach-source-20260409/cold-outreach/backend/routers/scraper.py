@@ -40,6 +40,7 @@ SOURCES = {
     "exhibition":      ("scrapers.exhibition",    "https://exh.taitra.org.tw"),
     "real_estate_591": ("scrapers.real_estate",   "https://newhouse.591.com.tw"),
     "ecommerce":       ("scrapers.ecommerce",     "shopee_search"),
+    "gemini_search":   ("scrapers.gemini_search", "gemini_search"),
 }
 
 DEFAULT_URLS = {k: v[1] for k, v in SOURCES.items()}
