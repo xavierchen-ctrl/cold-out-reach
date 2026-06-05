@@ -233,17 +233,49 @@ async def _search_bing(client, query: str) -> _Opt[str]:
     return None
 
 
+async def _guess_domain(client, company_name: str) -> _Opt[str]:
+    """從公司名稱猜測域名並用 HTTP 驗證是否存在"""
+    import re as _re
+    # 去掉常見後綴，只留品牌關鍵字
+    stripped = _re.sub(
+        r'\b(CO\.?,?\s*LTD\.?|INC\.?|CORP\.?|LLC\.?|LIMITED|CORPORATION|COMPANY'
+        r'|TAIWAN|TECHNOLOGY|TECH|ELECTRONICS|SYSTEM|SYSTEMS|SOLUTIONS|INTERNATIONAL|GLOBAL)\b',
+        '', company_name, flags=_re.IGNORECASE,
+    )
+    words = [w.lower() for w in _re.findall(r'[A-Za-z]+', stripped) if len(w) > 1]
+    if not words:
+        return None
+
+    candidates = []
+    candidates.append(f"https://www.{words[0]}.com.tw")
+    candidates.append(f"https://www.{words[0]}.tw")
+    candidates.append(f"https://www.{words[0]}.com")
+    if len(words) >= 2:
+        merged = words[0] + words[1]
+        candidates.append(f"https://www.{merged}.com.tw")
+        candidates.append(f"https://www.{merged}.tw")
+        candidates.append(f"https://www.{merged}.com")
+
+    for url in candidates:
+        try:
+            resp = await client.head(url, timeout=6, follow_redirects=True)
+            if resp.status_code < 400:
+                return str(resp.url)
+        except Exception:
+            pass
+    return None
+
+
 @router.get("/find-website")
 async def find_website_for_company(
     q: str,
     current_user: User = Depends(get_current_user),
 ):
-    """根據公司名稱搜尋官方網站（DuckDuckGo → Bing 備援）"""
+    """根據公司名稱搜尋官方網站（DuckDuckGo → Bing → 域名猜測）"""
     import re as _re
 
     is_english = bool(_re.match(r'^[A-Za-z0-9\s\.\,\-\&\(\)\/]+$', q.strip()))
 
-    # 清理後綴（CO., LTD. 等），保留核心品牌名
     clean_q = _re.sub(
         r'\b(CO\.?,?\s*LTD\.?|INC\.?|CORP\.?|LLC\.?|LIMITED|CORPORATION|COMPANY)\s*$',
         '', q, flags=_re.IGNORECASE,
@@ -263,18 +295,23 @@ async def find_website_for_company(
         async with httpx.AsyncClient(
             headers=_SEARCH_HEADERS, follow_redirects=True
         ) as client:
-            # 先試 DuckDuckGo
+            # 1. DuckDuckGo
             for search_q in candidates:
                 found = await _search_ddg(client, search_q)
                 if found:
                     break
 
-            # DuckDuckGo 失敗 → 試 Bing
+            # 2. Bing 備援
             if not found:
                 for search_q in candidates:
                     found = await _search_bing(client, search_q)
                     if found:
                         break
+
+            # 3. 域名猜測（僅英文名稱）
+            if not found and is_english:
+                found = await _guess_domain(client, q)
+
     except Exception as e:
         logger.warning(f"find-website error for {q!r}: {e}")
 
