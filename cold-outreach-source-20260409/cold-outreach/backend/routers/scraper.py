@@ -83,7 +83,7 @@ async def _run_scrape_module(source: str, url: str, keyword: str = None, industr
     # 統一格式：確保必要欄位存在
     normalized = []
     for item in result:
-        normalized.append({
+        entry = {
             "company_name": item.get("company_name", ""),
             "contact_name": item.get("contact_name"),
             "email": item.get("email"),
@@ -95,7 +95,12 @@ async def _run_scrape_module(source: str, url: str, keyword: str = None, industr
             "source": item.get("source", source),
             "source_url": item.get("source_url"),
             "notes": item.get("notes"),
-        })
+        }
+        # 保留 threads_posts 專屬欄位
+        for extra_key in ("post_text", "likes", "reposts", "replies"):
+            if extra_key in item:
+                entry[extra_key] = item[extra_key]
+        normalized.append(entry)
     return normalized
 
 
