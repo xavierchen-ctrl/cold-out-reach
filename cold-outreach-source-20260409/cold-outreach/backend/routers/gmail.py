@@ -14,7 +14,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from database import get_db
 from models import User, Lead, LeadActivity, ActivityType, LeadStatus
-from schemas import SendEmailRequest
+from schemas import SendEmailRequest, BulkSendRequest
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
@@ -186,6 +186,75 @@ def send_email(
         db.commit()
 
     return {"message": "sent"}
+
+
+def _replace_vars(text: str, lead: Lead) -> str:
+    return (text
+        .replace("{{company_name}}", lead.company_name or "")
+        .replace("{{contact_name}}", lead.contact_name or "您好")
+        .replace("{{industry}}", lead.industry or "")
+        .replace("{{city}}", lead.city or "")
+        .replace("{{title}}", lead.title or "")
+        .replace("{{email}}", lead.email or "")
+    )
+
+
+@router.post("/bulk-send")
+def bulk_send_email(
+    body: BulkSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """合併列印群發：對每位名單個別套入變數後發送"""
+    if not current_user.gmail_token:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Please authorize first.")
+    if len(body.lead_ids) > 200:
+        raise HTTPException(status_code=400, detail="單次群發上限 200 封")
+
+    token_data = json.loads(current_user.gmail_token)
+    creds = Credentials(
+        token=token_data["token"],
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get("client_id"),
+        client_secret=token_data.get("client_secret"),
+        scopes=token_data.get("scopes"),
+    )
+    service = build("gmail", "v1", credentials=creds)
+
+    import time
+    sent, failed, errors = 0, 0, []
+
+    for lead_id in body.lead_ids:
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead or not lead.email:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": "無 Email"})
+            continue
+        try:
+            subject = _replace_vars(body.subject, lead)
+            content = _replace_vars(body.body, lead)
+            msg = MIMEText(content, "plain", "utf-8")
+            msg["To"] = lead.email
+            msg["Subject"] = subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+            activity = LeadActivity(
+                lead_id=lead.id,
+                type=ActivityType.email_sent,
+                content=f"To: {lead.email}\nSubject: {subject}\n\n{content}",
+                created_by=current_user.id,
+            )
+            db.add(activity)
+            db.commit()
+            sent += 1
+            time.sleep(0.3)
+        except Exception as e:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": str(e)})
+
+    return {"sent": sent, "failed": failed, "errors": errors}
 
 
 @router.post("/check_replies")

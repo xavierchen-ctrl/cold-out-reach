@@ -65,6 +65,8 @@ export const getThreadsCookieStatus = () => api.get('/auth/me/threads-cookie')
 export const saveThreadsCookie = (session_id: string) => api.post('/auth/me/threads-cookie', { session_id })
 export const deleteThreadsCookie = () => api.delete('/auth/me/threads-cookie')
 export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/send', data)
+export const bulkSendEmail = (lead_ids: string[], subject: string, body: string) =>
+  api.post('/gmail/bulk-send', { lead_ids, subject, body })
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 export const generateDraft = (lead_id: string, template_type: string, customer_background?: string) =>

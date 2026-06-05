@@ -168,6 +168,12 @@ class SendEmailRequest(BaseModel):
     attachments: Optional[List["EmailAttachment"]] = None
 
 
+class BulkSendRequest(BaseModel):
+    lead_ids: List[UUID]
+    subject: str
+    body: str
+
+
 # ── AI ────────────────────────────────────────────────────────────────────────
 
 class DraftRequest(BaseModel):
