@@ -273,8 +273,28 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
                 window.chrome = {runtime: {}};
             """)
 
+            # ── 策略 1：攔截 Threads API 的 JSON 回應 ────────────────────────
+            captured_jsons: list = []
+
+            async def on_response(response):
+                try:
+                    resp_url = response.url
+                    if response.status != 200:
+                        return
+                    ct = response.headers.get("content-type", "")
+                    if "json" not in ct:
+                        return
+                    # 只取 threads.net 或 instagram.com 的 json
+                    if "threads.net" in resp_url or "instagram.com" in resp_url:
+                        body = await response.json()
+                        if body:
+                            captured_jsons.append(body)
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
+
             logger.info(f"Threads posts: loading {url}")
-            # 未登入時先造訪首頁建立 session；已有 cookie 時直接去搜尋頁
             if not session_cookie:
                 try:
                     await page.goto("https://www.threads.net/", wait_until="domcontentloaded", timeout=15000)
@@ -284,114 +304,86 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
 
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await page.wait_for_timeout(4000)
+                await page.wait_for_timeout(5000)
             except Exception as e:
                 logger.warning(f"Threads posts: page load error: {e}")
                 await browser.close()
                 return []
 
-            # 滾動載入更多貼文
-            for _ in range(6):
+            # 滾動觸發更多 API 呼叫
+            for _ in range(5):
                 await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                await page.wait_for_timeout(1800)
+                await page.wait_for_timeout(2000)
 
-            html = await page.content()
-            logger.info(f"Threads posts: page html size={len(html)}, has_article={'article' in html.lower()}")
+            logger.info(f"Threads posts: captured {len(captured_jsons)} JSON responses")
 
-            # 策略 1：DOM 選取器（多層fallback）
-            posts = await page.evaluate("""
-                () => {
-                    const results = [];
-                    const seen = new Set();
+            # 從攔截到的 API 回應解析貼文
+            posts = _extract_posts_from_api_responses(captured_jsons)
+            logger.info(f"Threads posts: API interception got {len(posts)} posts")
 
-                    // 多種 container 選取器
-                    const selectors = [
-                        'article',
-                        '[role="article"]',
-                        '[role="listitem"]',
-                        'div[data-pressable-container]',
-                    ];
-
-                    let containers = [];
-                    for (const sel of selectors) {
-                        const found = Array.from(document.querySelectorAll(sel));
-                        if (found.length > 0) { containers = found; break; }
-                    }
-
-                    // fallback：找所有含 /@username 連結的父 div
-                    if (containers.length === 0) {
-                        const allAuthorLinks = document.querySelectorAll('a[href^="/@"]');
-                        const parents = new Set();
-                        for (const link of allAuthorLinks) {
-                            let p = link.parentElement;
-                            for (let i = 0; i < 6 && p; i++, p = p.parentElement) {
-                                if ((p.textContent || '').length > 80) { parents.add(p); break; }
-                            }
+            # ── 策略 2：DOM 選取器 fallback ───────────────────────────────────
+            if not posts:
+                html = await page.content()
+                logger.info(f"Threads posts: html size={len(html)}")
+                posts = await page.evaluate("""
+                    () => {
+                        const results = [];
+                        const seen = new Set();
+                        const selectors = ['article','[role="article"]','[role="listitem"]','div[data-pressable-container]'];
+                        let containers = [];
+                        for (const sel of selectors) {
+                            const found = Array.from(document.querySelectorAll(sel));
+                            if (found.length > 0) { containers = found; break; }
                         }
-                        containers = Array.from(parents);
-                    }
-
-                    for (const container of containers) {
-                        try {
-                            const authorLink = container.querySelector('a[href^="/@"]');
-                            if (!authorLink) continue;
-
-                            const href = authorLink.getAttribute('href') || '';
-                            const username = href.replace(/^\\/@/, '').split('/')[0].split('?')[0];
-                            if (!username) continue;
-
-                            const dedupKey = username + '|' + (container.textContent || '').substring(0, 40);
-                            if (seen.has(dedupKey)) continue;
-                            seen.add(dedupKey);
-
-                            // 顯示名稱
-                            let displayName = username;
-                            const nameEl = authorLink.querySelector('span, strong, b');
-                            if (nameEl && nameEl.textContent) displayName = nameEl.textContent.trim();
-
-                            // 貼文文字：找最長非UI段落
-                            let postText = '';
-                            let maxLen = 0;
-                            for (const el of container.querySelectorAll('span, p, div')) {
-                                if (el.childElementCount > 6) continue;
-                                const t = (el.textContent || '').trim();
-                                const isUI = /^(\\d+\\s*(likes?|reposts?|replies|留言|讚|轉發)|log in|join|sign)/i.test(t);
-                                if (!isUI && t.length > maxLen && t.length > 20) {
-                                    maxLen = t.length;
-                                    postText = t;
+                        if (containers.length === 0) {
+                            const allLinks = document.querySelectorAll('a[href^="/@"]');
+                            const parents = new Set();
+                            for (const link of allLinks) {
+                                let p = link.parentElement;
+                                for (let i=0;i<8&&p;i++,p=p.parentElement){
+                                    if((p.textContent||'').length>80){parents.add(p);break;}
                                 }
                             }
-
-                            // 互動數
-                            let likes = 0, reposts = 0, replies = 0;
-                            for (const btn of container.querySelectorAll('[aria-label]')) {
-                                const label = (btn.getAttribute('aria-label') || '').toLowerCase();
-                                const m = label.match(/(\\d[\\d,]*)/);
-                                const n = m ? parseInt(m[1].replace(/,/g, '')) : 0;
-                                if (label.includes('like') || label.includes('讚')) likes = n;
-                                else if (label.includes('repost') || label.includes('rethread') || label.includes('轉')) reposts = n;
-                                else if (label.includes('repl') || label.includes('留言') || label.includes('comment')) replies = n;
-                            }
-
-                            // 貼文連結
-                            let postUrl = '';
-                            const pl = container.querySelector('a[href*="/post/"]');
-                            if (pl) postUrl = 'https://www.threads.net' + pl.getAttribute('href');
-
-                            results.push({ username, displayName, postText: postText.substring(0, 600), likes, reposts, replies, postUrl });
-                        } catch(e) {}
+                            containers = Array.from(parents);
+                        }
+                        for (const c of containers) {
+                            try {
+                                const al = c.querySelector('a[href^="/@"]');
+                                if(!al) continue;
+                                const username = (al.getAttribute('href')||'').replace(/^\\/@ /,'').split('/')[0].split('?')[0];
+                                if(!username) continue;
+                                const dk = username+'|'+(c.textContent||'').substring(0,40);
+                                if(seen.has(dk)) continue; seen.add(dk);
+                                const nameEl = al.querySelector('span,strong,b');
+                                const displayName = (nameEl&&nameEl.textContent)?nameEl.textContent.trim():username;
+                                let postText='',maxLen=0;
+                                for(const el of c.querySelectorAll('span,p')){
+                                    if(el.childElementCount>4) continue;
+                                    const t=(el.textContent||'').trim();
+                                    if(!/^[\\d\\s.,·]+$/.test(t)&&t.length>maxLen&&t.length>20){maxLen=t.length;postText=t;}
+                                }
+                                let likes=0,reposts=0,replies=0;
+                                for(const btn of c.querySelectorAll('[aria-label]')){
+                                    const lb=(btn.getAttribute('aria-label')||'').toLowerCase();
+                                    const m=lb.match(/(\\d[\\d,]*)/);
+                                    const n=m?parseInt(m[1].replace(/,/g,'')):0;
+                                    if(lb.includes('like')||lb.includes('讚'))likes=n;
+                                    else if(lb.includes('repost')||lb.includes('rethread')||lb.includes('轉'))reposts=n;
+                                    else if(lb.includes('repl')||lb.includes('留言'))replies=n;
+                                }
+                                const pl=c.querySelector('a[href*="/post/"]');
+                                const postUrl=pl?'https://www.threads.net'+pl.getAttribute('href'):'';
+                                results.push({username,displayName,postText:postText.substring(0,600),likes,reposts,replies,postUrl});
+                            } catch(e){}
+                        }
+                        return results;
                     }
-                    return results;
-                }
-            """)
-
-            # 策略 2：從 HTML 中提取嵌入的 JSON 資料
-            if not posts:
-                logger.info("Threads posts: DOM strategy got 0, trying JSON extraction from HTML")
-                posts = _extract_posts_from_html(html)
+                """)
+                if not posts:
+                    posts = _extract_posts_from_html(html)
 
             await browser.close()
-            logger.info(f"Threads posts: final extracted {len(posts)} posts")
+            logger.info(f"Threads posts: final {len(posts)} posts")
 
             for post in posts[:limit]:
                 username = post.get('username', '')
@@ -420,6 +412,22 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
         logger.error(f"Threads posts scraper error: {e}")
 
     return results
+
+
+def _extract_posts_from_api_responses(jsons: list) -> list:
+    """從 Playwright 攔截到的 Threads API JSON 回應中提取貼文"""
+    posts = []
+    seen = set()
+    for body in jsons:
+        _collect_posts_from_json(body, posts, depth=0)
+    # 去重
+    unique = []
+    for p in posts:
+        key = p.get('username', '') + '|' + (p.get('postText', '') or '')[:30]
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    return unique[:100]
 
 
 def _extract_posts_from_html(html: str) -> list:
@@ -456,23 +464,50 @@ def _extract_posts_from_html(html: str) -> list:
 
 
 def _collect_posts_from_json(obj, out: list, depth: int = 0):
-    if depth > 10 or len(out) > 50:
+    if depth > 12 or len(out) > 100:
         return
     if isinstance(obj, dict):
-        # Threads 貼文特徵：有 username + body_text 或 caption
-        username = obj.get('username') or obj.get('user', {}).get('username', '') if isinstance(obj.get('user'), dict) else ''
-        text = obj.get('caption') or obj.get('body_text') or obj.get('text') or ''
-        if username and text and len(str(text)) > 15:
+        # 嘗試 Threads API 的貼文格式
+        user = obj.get('user') if isinstance(obj.get('user'), dict) else {}
+        username = (
+            obj.get('username')
+            or user.get('username')
+            or ''
+        )
+        # caption 可能是 str 或 {"text": "..."}
+        cap = obj.get('caption') or obj.get('body_text') or obj.get('text') or ''
+        if isinstance(cap, dict):
+            cap = cap.get('text', '')
+        text = str(cap).strip() if cap else ''
+
+        if username and text and len(text) > 15:
+            # 貼文 URL：用 code 或 pk 組成
+            code = obj.get('code') or obj.get('pk') or ''
+            post_url = (
+                f"https://www.threads.net/@{username}/post/{code}"
+                if code else f"https://www.threads.net/@{username}"
+            )
             out.append({
                 "username": str(username),
-                "displayName": obj.get('full_name') or (obj.get('user', {}).get('full_name', '') if isinstance(obj.get('user'), dict) else '') or username,
-                "postText": str(text)[:600],
+                "displayName": (
+                    obj.get('full_name')
+                    or user.get('full_name')
+                    or user.get('username')
+                    or username
+                ),
+                "postText": text[:600],
                 "likes": obj.get('like_count') or obj.get('likes') or 0,
                 "reposts": obj.get('repost_count') or obj.get('reposts') or 0,
-                "replies": obj.get('reply_count') or obj.get('replies') or 0,
-                "postUrl": f"https://www.threads.net/@{username}",
+                "replies": (
+                    obj.get('reply_count')
+                    or obj.get('replies')
+                    or (obj.get('text_post_app_thread') or {}).get('reply_count', 0)
+                    if isinstance(obj.get('text_post_app_thread'), dict) else 0
+                ),
+                "postUrl": post_url,
             })
             return
+
         for v in obj.values():
             _collect_posts_from_json(v, out, depth + 1)
     elif isinstance(obj, list):
