@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { previewScraperJob, importScraperJob, findCompanyWebsite, updateScraperJobField } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, X } from 'lucide-react'
+import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2 } from 'lucide-react'
 
 interface ScrapedCompany {
   company_name: string
@@ -249,26 +249,14 @@ export default function ScraperJobPage() {
 
                         <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
                           {c.website ? (
-                            <div className="flex items-center gap-1 group">
-                              <a
-                                href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-blue-500 hover:underline text-xs break-all"
-                              >
-                                {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
-                              </a>
-                              <button
-                                title="清除網址，重新查找"
-                                className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity flex-shrink-0"
-                                onClick={async () => {
-                                  setCompanies(prev => prev.map((item, i) => i === idx ? { ...item, website: undefined } : item))
-                                  if (id) await updateScraperJobField(id, idx, 'website', null)
-                                }}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </div>
+                            <a
+                              href={c.website.startsWith('http') ? c.website : `https://${c.website}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-blue-500 hover:underline text-xs break-all"
+                            >
+                              {c.website.length > 30 ? c.website.slice(0, 30) + '...' : c.website}
+                            </a>
                           ) : findingWebsite.has(idx) ? (
                             <span className="flex items-center gap-1 text-xs text-gray-400">
                               <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
