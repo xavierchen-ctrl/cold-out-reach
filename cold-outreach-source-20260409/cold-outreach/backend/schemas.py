@@ -154,11 +154,18 @@ class ActivityOut(BaseModel):
 
 # ── Gmail ─────────────────────────────────────────────────────────────────────
 
+class EmailAttachment(BaseModel):
+    filename: str
+    content: str       # base64 encoded
+    mime_type: str = "application/octet-stream"
+
+
 class SendEmailRequest(BaseModel):
     lead_id: UUID
     to: str
     subject: str
     body: str
+    attachments: Optional[List["EmailAttachment"]] = None
 
 
 # ── AI ────────────────────────────────────────────────────────────────────────

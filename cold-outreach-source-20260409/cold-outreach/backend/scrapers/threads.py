@@ -8,7 +8,7 @@ import asyncio
 import logging
 import re
 from typing import List, Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def _extract_url_from_text(text: str) -> Optional[str]:
     return None
 
 
-async def _scrape_with_playwright(url: str, keyword: str, limit: int) -> List[dict]:
+async def _scrape_with_playwright(url: str, _keyword: str, limit: int) -> List[dict]:
     """用 Playwright 搜尋 Threads 並抓取帳號資訊"""
     results = []
     try:
@@ -220,7 +220,7 @@ async def _scrape_with_playwright(url: str, keyword: str, limit: int) -> List[di
     return results
 
 
-async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: str = None) -> List[dict]:
+async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: str = None, keyword: str = None) -> List[dict]:
     """爬取 Threads 貼文搜尋結果（serp_type=posts），含讚數/轉發/留言"""
     results = []
     try:
@@ -274,6 +274,7 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
             """)
 
             # ── 策略 1：攔截 Threads API 的 JSON 回應 ────────────────────────
+            # (resp_url, body) tuples so we can prioritize search responses
             captured_jsons: list = []
 
             async def on_response(response):
@@ -284,11 +285,10 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
                     ct = response.headers.get("content-type", "")
                     if "json" not in ct:
                         return
-                    # 只取 threads.net 或 instagram.com 的 json
                     if "threads.net" in resp_url or "instagram.com" in resp_url:
                         body = await response.json()
                         if body:
-                            captured_jsons.append(body)
+                            captured_jsons.append((resp_url, body))
                 except Exception:
                     pass
 
@@ -317,8 +317,8 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
 
             logger.info(f"Threads posts: captured {len(captured_jsons)} JSON responses")
 
-            # 從攔截到的 API 回應解析貼文
-            posts = _extract_posts_from_api_responses(captured_jsons)
+            # 從攔截到的 API 回應解析貼文（優先解析 search 相關 URL）
+            posts = _extract_posts_from_api_responses(captured_jsons, keyword=keyword)
             logger.info(f"Threads posts: API interception got {len(posts)} posts")
 
             # ── 策略 2：DOM 選取器 fallback ───────────────────────────────────
@@ -414,19 +414,45 @@ async def _scrape_posts_with_playwright(url: str, limit: int, session_cookie: st
     return results
 
 
-def _extract_posts_from_api_responses(jsons: list) -> list:
-    """從 Playwright 攔截到的 Threads API JSON 回應中提取貼文"""
+def _extract_posts_from_api_responses(jsons: list, keyword: str = None) -> list:
+    """從 Playwright 攔截到的 Threads API JSON 回應中提取貼文
+    jsons: list of (resp_url, body) tuples
+    """
+    # 優先解析 search 相關 URL，其他的放後面
+    search_bodies = []
+    other_bodies = []
+    for item in jsons:
+        if isinstance(item, tuple):
+            resp_url, body = item
+        else:
+            resp_url, body = "", item
+        if any(k in resp_url for k in ("search", "keyword", "serp")):
+            search_bodies.append(body)
+        else:
+            other_bodies.append(body)
+
     posts = []
-    seen = set()
-    for body in jsons:
+    for body in search_bodies + other_bodies:
         _collect_posts_from_json(body, posts, depth=0)
+
     # 去重
+    seen = set()
     unique = []
     for p in posts:
         key = p.get('username', '') + '|' + (p.get('postText', '') or '')[:30]
         if key not in seen:
             seen.add(key)
             unique.append(p)
+
+    # keyword 篩選
+    if keyword:
+        kw_lower = keyword.lower()
+        filtered = [p for p in unique if kw_lower in (p.get('postText') or '').lower()
+                    or kw_lower in (p.get('username') or '').lower()
+                    or kw_lower in (p.get('displayName') or '').lower()]
+        if filtered:
+            return filtered[:100]
+
     return unique[:100]
 
 
@@ -545,17 +571,17 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
     if is_posts_mode:
         logger.info(f"Threads posts mode: url={search_url}, limit={lim}, has_cookie={bool(cookies_str)}")
-        results = await _scrape_posts_with_playwright(search_url, lim, session_cookie=cookies_str)
+        results = await _scrape_posts_with_playwright(search_url, lim, session_cookie=cookies_str, keyword=keyword)
     else:
         logger.info(f"Threads accounts mode: url={search_url}, limit={lim}")
         results = await _scrape_with_playwright(search_url, keyword or "", lim)
 
-    # 帳號模式才做 keyword 篩選（貼文模式搜尋結果本身就已過濾）
-    if not is_posts_mode and keyword and results:
+    if keyword and results:
         kw_lower = keyword.lower()
         filtered = [
             r for r in results
-            if kw_lower in (r.get("company_name") or "").lower()
+            if kw_lower in (r.get("post_text") or "").lower()
+            or kw_lower in (r.get("company_name") or "").lower()
             or kw_lower in (r.get("notes") or "").lower()
             or kw_lower in (r.get("contact_name") or "").lower()
         ]

@@ -8,9 +8,8 @@ import asyncio
 import importlib
 import json
 import logging
-from typing import List, Optional
+from typing import List
 from uuid import UUID
-from datetime import datetime
 from utils import now_tw
 
 import httpx
@@ -21,7 +20,7 @@ from sqlalchemy.orm import Session
 from database import get_db, SessionLocal
 from models import User, Lead, LeadStatus, ScraperJob, ScraperJobStatus, UserRole
 from schemas import ScraperRunRequest, ScraperJobOut, ScraperImportRequest, ScrapedCompany
-from auth import get_current_user, require_admin_or_manager
+from auth import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +40,6 @@ SOURCES = {
     "exhibition":      ("scrapers.exhibition",    "https://exh.taitra.org.tw"),
     "real_estate_591": ("scrapers.real_estate",   "https://newhouse.591.com.tw"),
     "ecommerce":       ("scrapers.ecommerce",     "shopee_search"),
-    "threads":         ("scrapers.threads",        "https://www.threads.net/search?q=數位行銷&serp_type=default"),
-    "threads_posts":   ("scrapers.threads",        "https://www.threads.net/search?q=數位行銷&serp_type=posts"),
 }
 
 DEFAULT_URLS = {k: v[1] for k, v in SOURCES.items()}

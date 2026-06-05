@@ -3,6 +3,9 @@ import json
 import base64
 import re
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
@@ -149,7 +152,20 @@ def send_email(
 
     try:
         service = build("gmail", "v1", credentials=creds)
-        msg = MIMEText(body.body, "plain", "utf-8")
+
+        if body.attachments:
+            msg = MIMEMultipart()
+            msg.attach(MIMEText(body.body, "plain", "utf-8"))
+            for att in body.attachments:
+                mime_main, mime_sub = (att.mime_type + "/octet-stream").split("/", 1)[:2] if "/" in att.mime_type else ("application", "octet-stream")
+                part = MIMEBase(mime_main, mime_sub)
+                part.set_payload(base64.b64decode(att.content))
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=att.filename)
+                msg.attach(part)
+        else:
+            msg = MIMEText(body.body, "plain", "utf-8")
+
         msg["To"] = body.to
         msg["Subject"] = body.subject
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()

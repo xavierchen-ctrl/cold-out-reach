@@ -128,8 +128,6 @@ export const SCRAPER_SOURCES: Record<string, string> = {
   job_104: '104 人力銀行',
   job_1111: '1111 人力銀行',
   real_estate_591: '591 新成屋（建商電話）',
-  threads: 'Threads（品牌/KOL 帳號）',
-  threads_posts: 'Threads（貼文搜尋）',
   custom_url: '自訂網址',
 }
 
@@ -139,8 +137,6 @@ export const SCRAPER_DEFAULT_URLS: Record<string, string> = {
   job_104: 'https://www.104.com.tw/jobs/search/api/jobs?keyword=數位行銷',
   job_1111: 'https://www.1111.com.tw/search/job?ks=數位行銷',
   real_estate_591: 'https://newhouse.591.com.tw',
-  threads: 'https://www.threads.net/search?q=數位行銷&serp_type=default',
-  threads_posts: 'https://www.threads.net/search?q=數位行銷&serp_type=posts',
   custom_url: 'https://',
 }
 
