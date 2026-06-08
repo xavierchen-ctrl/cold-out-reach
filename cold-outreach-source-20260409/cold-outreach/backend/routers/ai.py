@@ -864,7 +864,7 @@ async def generate_ppt_brief(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
         response = model.generate_content(prompt)
         return {"brief": response.text.strip(), "company_name": lead.company_name}
     except Exception as e:
