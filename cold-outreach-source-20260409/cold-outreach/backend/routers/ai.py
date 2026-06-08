@@ -19,6 +19,7 @@ from utils import now_tw
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 TEMPLATES = {
     "intro": "初次開發信。這是第一次接觸，請保持專業但友善，簡要介紹我們的數位行銷服務，並提出一個明確的行動呼籲（安排 15 分鐘通話）。",
@@ -798,8 +799,8 @@ async def generate_ppt_brief(
     _current_user: User = Depends(get_current_user),
 ):
     """根據廠商資料生成簡報所需的背景資料（Markdown 格式，可複製到 Gamma/Canva 等工具）。"""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if not lead:
@@ -865,10 +866,13 @@ async def generate_ppt_brief(
 請直接輸出 Markdown 內容，不要加任何前言或說明。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash-lite")
-        response = model.generate_content(prompt)
-        return {"brief": response.text.strip(), "company_name": lead.company_name}
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return {"brief": response.choices[0].message.content.strip(), "company_name": lead.company_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
@@ -881,9 +885,9 @@ async def create_google_slides(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """用 Gemini 生成簡報內容，並透過 Google Slides API 在用戶 Drive 建立簡報。"""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    """用 OpenAI 生成簡報內容，並透過 Google Slides API 在用戶 Drive 建立簡報。"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     if not current_user.gmail_token:
         raise HTTPException(status_code=400, detail="請先在設定頁面連結 Google 帳號")
@@ -943,14 +947,15 @@ async def create_google_slides(
 每個 bullets 包含 3-5 個繁體中文條列，具體且有說服力。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash-lite")
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
-        raw = re.sub(r'^```json\s*', '', raw)
-        raw = re.sub(r'^```\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        slide_content = json.loads(raw.strip())
+        from openai import OpenAI
+        oai = OpenAI(api_key=OPENAI_API_KEY)
+        response = oai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content.strip()
+        slide_content = json.loads(raw)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
 
