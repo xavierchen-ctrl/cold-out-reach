@@ -9,7 +9,7 @@ import {
   getLeadTags, getTags, addLeadTags, removeLeadTag,
   getAttachments, uploadAttachment, downloadAttachment, deleteAttachment,
   getLeadCadences, getCalls, createCall, recalcEngagement,
-  analyzeSignals, generateEmail, generateProposalEmail, generatePptBrief,
+  analyzeSignals, generateEmail, generateProposalEmail,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, EmailTemplate, Contact, Tag, Attachment, CadenceEnrollment, CallLog, CallOutcome, CALL_OUTCOME_LABELS, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, ACTIVITY_LABELS } from '@/types'
@@ -69,12 +69,6 @@ export default function LeadDetailPage() {
   const [showAiEmailModal, setShowAiEmailModal] = useState(false)
   const [capitalInput, setCapitalInput] = useState('')
   const [savingCapital, setSavingCapital] = useState(false)
-
-  // PPT Brief
-  const [showPptModal, setShowPptModal] = useState(false)
-  const [pptBrief, setPptBrief] = useState('')
-  const [generatingPpt, setGeneratingPpt] = useState(false)
-  const [pptCopied, setPptCopied] = useState(false)
 
   // Proposal
   const [showProposalModal, setShowProposalModal] = useState(false)
@@ -429,20 +423,6 @@ export default function LeadDetailPage() {
     }
   }
 
-  const handleGeneratePptBrief = async () => {
-    if (!id) return
-    setGeneratingPpt(true)
-    setPptBrief('')
-    try {
-      const res = await generatePptBrief(id)
-      setPptBrief(res.data.brief)
-    } catch (e: unknown) {
-      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '簡報資料生成失敗')
-    } finally {
-      setGeneratingPpt(false)
-    }
-  }
-
   const handleGenerateProposal = async () => {
     if (!id) return
     setGeneratingProposal(true)
@@ -493,10 +473,6 @@ export default function LeadDetailPage() {
             <Button size="sm" variant="outline" onClick={() => { setShowProposalModal(true); setProposalResult(null) }}>
               <span className="md:mr-1.5">📋</span>
               <span className="hidden md:inline">生成提案信</span>
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => { setShowPptModal(true); setPptBrief('') }}>
-              <span className="md:mr-1.5">🖼️</span>
-              <span className="hidden md:inline">簡報資料</span>
             </Button>
             <Button size="sm" onClick={() => setShowEmail(true)}>
               <Mail className="w-3.5 h-3.5 md:mr-1.5" />
@@ -1705,53 +1681,6 @@ export default function LeadDetailPage() {
                   }}>
                     套用到發信
                   </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* PPT Brief Modal */}
-      <Dialog open={showPptModal} onOpenChange={v => { setShowPptModal(v); if (!v) { setPptBrief(''); setPptCopied(false) } }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>🖼️ 簡報背景資料</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              AI 根據廠商資料生成結構化簡報素材，複製後貼入 <strong>Gamma.app</strong>、<strong>Canva AI</strong> 等工具即可自動產出簡報。
-            </p>
-            <Button onClick={handleGeneratePptBrief} disabled={generatingPpt} className="w-full">
-              <Sparkles className="w-4 h-4 mr-2" />
-              {generatingPpt ? '生成中...' : '生成簡報背景資料'}
-            </Button>
-
-            {pptBrief && (
-              <div className="space-y-3">
-                <Textarea
-                  value={pptBrief}
-                  onChange={e => setPptBrief(e.target.value)}
-                  rows={20}
-                  className="text-sm font-mono"
-                />
-                <div className="flex gap-2 justify-between items-center">
-                  <p className="text-xs text-muted-foreground">可直接編輯後再複製</p>
-                  <Button
-                    variant={pptCopied ? 'default' : 'outline'}
-                    size="sm"
-                    onClick={() => {
-                      navigator.clipboard.writeText(pptBrief)
-                      setPptCopied(true)
-                      setTimeout(() => setPptCopied(false), 2000)
-                    }}
-                  >
-                    {pptCopied ? '✅ 已複製！' : '複製全部'}
-                  </Button>
-                </div>
-                <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
-                  <p className="font-medium">貼入以下工具即可產出簡報：</p>
-                  <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
-                  <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
-                  <p>• <strong>ChatGPT / Claude</strong> → 要求轉換為 PPT 大綱</p>
                 </div>
               </div>
             )}
