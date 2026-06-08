@@ -782,3 +782,91 @@ async def generate_proposal(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
+
+# ── PPT 簡報背景資料生成 ───────────────────────────────────────────────────────
+
+class PptBriefRequest(BaseModel):
+    lead_id: str
+
+
+@router.post("/ppt-brief")
+async def generate_ppt_brief(
+    body: PptBriefRequest,
+    db: Session = Depends(get_db),
+    _current_user: User = Depends(get_current_user),
+):
+    """根據廠商資料生成簡報所需的背景資料（Markdown 格式，可複製到 Gamma/Canva 等工具）。"""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    score = lead.enriched_score or 0
+
+    tech_parts = []
+    if tech.get("ga4"): tech_parts.append("GA4 分析")
+    if tech.get("gtm"): tech_parts.append("Google Tag Manager")
+    if tech.get("meta_pixel"): tech_parts.append("Meta Pixel")
+    if tech.get("google_ads_tag"): tech_parts.append("Google Ads 追蹤")
+    tech_summary = "、".join(tech_parts) if tech_parts else "尚未偵測到追蹤工具"
+
+    ad_parts = []
+    if ad.get("meta", {}).get("has_ads"): ad_parts.append("Meta 廣告")
+    if ad.get("google_ads", {}).get("has_ads"): ad_parts.append("Google 廣告")
+    ad_summary = "、".join(ad_parts) if ad_parts else "尚未偵測到廣告投放"
+
+    prompt = f"""你是潮網科技（Wavenet Technology）的資深業務顧問，正在準備一份拜訪客戶前的簡報背景資料。
+
+請根據以下廠商資訊，用繁體中文生成一份適合製作 PowerPoint 的結構化背景資料。
+每個章節請用清晰的標題和條列式重點，語氣專業，便於直接貼入 Gamma.app / Canva 等 AI 簡報工具。
+
+## 廠商資訊
+- 公司名稱：{lead.company_name}
+- 聯絡人：{lead.contact_name or "未知"}
+- 職稱：{lead.title or "未知"}
+- 產業：{lead.industry or "未知"}
+- 城市：{lead.city or "台灣"}
+- 公司規模：{lead.company_size or "未知"}
+- 官方網站：{lead.website or "未知"}
+- 含金量評分：{score}/100
+- 已安裝追蹤工具：{tech_summary}
+- 廣告投放現況：{ad_summary}
+- 備注：{lead.notes or "無"}
+
+## 輸出格式（請嚴格依照此架構）
+
+# 【{lead.company_name}】簡報背景資料
+
+## 1. 公司概況
+（3-5 個條列，涵蓋：產業定位、主要業務、服務對象、地理範圍）
+
+## 2. 推測主要產品／服務
+（根據產業與公司名稱推測，3-5 個條列）
+
+## 3. 數位行銷現況分析
+（根據偵測到的工具與廣告投放分析，3-5 個條列，點出現況強項與缺口）
+
+## 4. 市場機會與痛點
+（3-4 個條列，說明該廠商可能面臨的行銷挑戰）
+
+## 5. 潮網建議合作方向
+（3-4 個條列，具體列出可切入的服務項目與預期效益）
+
+## 6. 簡報開場白建議
+（1 段 50 字以內的開場白，適合面對面拜訪時使用）
+
+---
+請直接輸出 Markdown 內容，不要加任何前言或說明。"""
+
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.0-flash")
+        response = model.generate_content(prompt)
+        return {"brief": response.text.strip(), "company_name": lead.company_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+

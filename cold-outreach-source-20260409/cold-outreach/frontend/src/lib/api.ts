@@ -328,3 +328,7 @@ export const generateEmail = (data: {website_url: string, product: string, lead_
 // ── 提案信生成（舊版 AI email，保留相容）────────────────────────────────────────
 export const generateProposalEmail = (data: { lead_id: string; product: string; tone?: string }) =>
   api.post('/ai/generate-proposal', data)
+
+// ── 簡報背景資料生成 ───────────────────────────────────────────────────────────
+export const generatePptBrief = (lead_id: string) =>
+  api.post('/ai/ppt-brief', { lead_id })
