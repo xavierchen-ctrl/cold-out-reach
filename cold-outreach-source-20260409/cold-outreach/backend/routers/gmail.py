@@ -21,6 +21,8 @@ router = APIRouter(prefix="/api/gmail", tags=["gmail"])
 
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/presentations",
+    "https://www.googleapis.com/auth/drive.file",
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
 ]

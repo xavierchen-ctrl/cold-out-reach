@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import httpx
 import google.generativeai as genai
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
 from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType
 from schemas import DraftRequest, DraftResponse
@@ -870,3 +872,213 @@ async def generate_ppt_brief(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
+
+# ── Google Slides 簡報建立 ─────────────────────────────────────────────────────
+
+@router.post("/create-slides")
+async def create_google_slides(
+    body: PptBriefRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """用 Gemini 生成簡報內容，並透過 Google Slides API 在用戶 Drive 建立簡報。"""
+    if not GEMINI_API_KEY:
+        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+
+    if not current_user.gmail_token:
+        raise HTTPException(status_code=400, detail="請先在設定頁面連結 Google 帳號")
+
+    token_data = json.loads(current_user.gmail_token)
+    if "https://www.googleapis.com/auth/presentations" not in token_data.get("scopes", []):
+        raise HTTPException(
+            status_code=403,
+            detail="需要重新連結 Google 帳號以授予 Google Slides 存取權限，請前往設定頁面重新連結"
+        )
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    # 1. Gemini 生成結構化簡報內容
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    score = lead.enriched_score or 0
+
+    tech_parts = []
+    if tech.get("ga4"): tech_parts.append("GA4")
+    if tech.get("gtm"): tech_parts.append("GTM")
+    if tech.get("meta_pixel"): tech_parts.append("Meta Pixel")
+    tech_str = "、".join(tech_parts) if tech_parts else "無"
+
+    ad_parts = []
+    if ad.get("meta", {}).get("has_ads"): ad_parts.append("Meta 廣告")
+    if ad.get("google_ads", {}).get("has_ads"): ad_parts.append("Google 廣告")
+    ad_str = "、".join(ad_parts) if ad_parts else "無"
+
+    prompt = f"""你是潮網科技的業務顧問。請根據以下廠商資訊，生成一份 6 頁 Google Slides 簡報的內容。
+
+廠商資訊：
+- 公司名稱：{lead.company_name}
+- 產業：{lead.industry or "未知"}
+- 城市：{lead.city or "台灣"}
+- 官網：{lead.website or "未知"}
+- 公司規模：{lead.company_size or "未知"}
+- 含金量評分：{score}/100
+- 已安裝追蹤工具：{tech_str}
+- 廣告投放：{ad_str}
+
+只輸出 JSON，不要其他說明：
+{{
+  "title": "【{lead.company_name}】數位行銷提案",
+  "slides": [
+    {{"title": "關於 {lead.company_name}", "bullets": ["要點1", "要點2", "要點3"]}},
+    {{"title": "主要產品與服務", "bullets": ["項目1", "項目2", "項目3"]}},
+    {{"title": "數位行銷現況分析", "bullets": ["分析1", "分析2", "分析3"]}},
+    {{"title": "市場機會與挑戰", "bullets": ["機會1", "機會2", "機會3"]}},
+    {{"title": "潮網建議合作方向", "bullets": ["建議1", "建議2", "建議3"]}},
+    {{"title": "下一步行動", "bullets": ["安排 15 分鐘線上會議", "提供詳細提案與報價", "聯絡信箱：service@wavenet.com.tw"]}}
+  ]
+}}
+
+每個 bullets 包含 3-5 個繁體中文條列，具體且有說服力。"""
+
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        model = genai.GenerativeModel("gemini-2.0-flash-lite")
+        response = model.generate_content(prompt)
+        raw = response.text.strip()
+        raw = re.sub(r'^```json\s*', '', raw)
+        raw = re.sub(r'^```\s*', '', raw)
+        raw = re.sub(r'\s*```$', '', raw)
+        slide_content = json.loads(raw.strip())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
+
+    # 2. 建立 Google Slides 簡報
+    try:
+        creds = Credentials(
+            token=token_data["token"],
+            refresh_token=token_data.get("refresh_token"),
+            token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            client_id=token_data.get("client_id"),
+            client_secret=token_data.get("client_secret"),
+            scopes=token_data.get("scopes"),
+        )
+
+        slides_service = build("slides", "v1", credentials=creds)
+
+        presentation = slides_service.presentations().create(
+            body={"title": slide_content["title"]}
+        ).execute()
+        pres_id = presentation["presentationId"]
+        default_slide_id = presentation["slides"][0]["objectId"]
+
+        requests = [{"deleteObject": {"objectId": default_slide_id}}]
+
+        for i, slide_data in enumerate(slide_content.get("slides", [])):
+            slide_id = f"slide_{i}"
+            title_id = f"title_{i}"
+            body_id = f"body_{i}"
+
+            requests.append({
+                "insertSlide": {
+                    "objectId": slide_id,
+                    "insertionIndex": i,
+                    "slideLayoutReference": {"predefinedLayout": "BLANK"},
+                }
+            })
+
+            requests += [
+                {
+                    "createShape": {
+                        "objectId": title_id,
+                        "shapeType": "TEXT_BOX",
+                        "elementProperties": {
+                            "pageObjectId": slide_id,
+                            "size": {
+                                "height": {"magnitude": 900000, "unit": "EMU"},
+                                "width": {"magnitude": 8229600, "unit": "EMU"},
+                            },
+                            "transform": {
+                                "scaleX": 1, "scaleY": 1,
+                                "translateX": 457200, "translateY": 300000,
+                                "unit": "EMU",
+                            },
+                        },
+                    }
+                },
+                {
+                    "insertText": {
+                        "objectId": title_id,
+                        "text": slide_data.get("title", ""),
+                        "insertionIndex": 0,
+                    }
+                },
+                {
+                    "updateTextStyle": {
+                        "objectId": title_id,
+                        "style": {
+                            "bold": True,
+                            "fontSize": {"magnitude": 28, "unit": "PT"},
+                            "foregroundColor": {
+                                "opaqueColor": {
+                                    "rgbColor": {"red": 0.11, "green": 0.22, "blue": 0.47}
+                                }
+                            },
+                        },
+                        "textRange": {"type": "ALL"},
+                        "fields": "bold,fontSize,foregroundColor",
+                    }
+                },
+            ]
+
+            bullets = slide_data.get("bullets", [])
+            if bullets:
+                requests += [
+                    {
+                        "createShape": {
+                            "objectId": body_id,
+                            "shapeType": "TEXT_BOX",
+                            "elementProperties": {
+                                "pageObjectId": slide_id,
+                                "size": {
+                                    "height": {"magnitude": 3500000, "unit": "EMU"},
+                                    "width": {"magnitude": 8229600, "unit": "EMU"},
+                                },
+                                "transform": {
+                                    "scaleX": 1, "scaleY": 1,
+                                    "translateX": 457200, "translateY": 1300000,
+                                    "unit": "EMU",
+                                },
+                            },
+                        }
+                    },
+                    {
+                        "insertText": {
+                            "objectId": body_id,
+                            "text": "\n".join(f"• {b}" for b in bullets),
+                            "insertionIndex": 0,
+                        }
+                    },
+                    {
+                        "updateTextStyle": {
+                            "objectId": body_id,
+                            "style": {"fontSize": {"magnitude": 18, "unit": "PT"}},
+                            "textRange": {"type": "ALL"},
+                            "fields": "fontSize",
+                        }
+                    },
+                ]
+
+        slides_service.presentations().batchUpdate(
+            presentationId=pres_id,
+            body={"requests": requests},
+        ).execute()
+
+        return {
+            "url": f"https://docs.google.com/presentation/d/{pres_id}/edit",
+            "title": slide_content["title"],
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Google Slides 建立失敗：{str(e)}")

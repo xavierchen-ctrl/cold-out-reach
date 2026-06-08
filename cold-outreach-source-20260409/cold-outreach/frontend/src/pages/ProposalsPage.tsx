@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  generatePptBrief,
+  generatePptBrief, createGoogleSlides,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -272,8 +272,10 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [creatingSlides, setCreatingSlides] = useState(false)
   const [brief, setBrief] = useState('')
   const [copied, setCopied] = useState(false)
+  const [slidesError, setSlidesError] = useState('')
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -298,6 +300,21 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
       alert(`生成失敗：${msg || String(err)}`)
     } finally {
       setGenerating(false)
+    }
+  }
+
+  const handleCreateSlides = async () => {
+    if (!selectedId) return
+    setCreatingSlides(true)
+    setSlidesError('')
+    try {
+      const res = await createGoogleSlides(selectedId)
+      window.open(res.data.url, '_blank')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setSlidesError(msg || '建立失敗，請稍後再試')
+    } finally {
+      setCreatingSlides(false)
     }
   }
 
@@ -334,15 +351,34 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
             </Select>
           </div>
 
-          <Button
-            onClick={handleGenerate}
-            disabled={!selectedId || generating}
-            className="w-full"
-          >
-            {generating
-              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-              : '✨ 生成簡報背景資料'}
-          </Button>
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              onClick={handleGenerate}
+              disabled={!selectedId || generating || creatingSlides}
+              variant="outline"
+            >
+              {generating
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+                : '✨ 生成文字素材'}
+            </Button>
+            <Button
+              onClick={handleCreateSlides}
+              disabled={!selectedId || generating || creatingSlides}
+            >
+              {creatingSlides
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />建立中...</>
+                : '🔗 建立 Google 簡報'}
+            </Button>
+          </div>
+
+          {slidesError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
+              {slidesError}
+              {slidesError.includes('重新連結') && (
+                <a href="/settings" className="ml-2 underline font-medium">前往設定頁面</a>
+              )}
+            </div>
+          )}
 
           {brief && (
             <div className="space-y-3">

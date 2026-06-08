@@ -332,3 +332,7 @@ export const generateProposalEmail = (data: { lead_id: string; product: string; 
 // ── 簡報背景資料生成 ───────────────────────────────────────────────────────────
 export const generatePptBrief = (lead_id: string) =>
   api.post('/ai/ppt-brief', { lead_id })
+
+// ── Google Slides 簡報建立 ────────────────────────────────────────────────────
+export const createGoogleSlides = (lead_id: string) =>
+  api.post('/ai/create-slides', { lead_id })
