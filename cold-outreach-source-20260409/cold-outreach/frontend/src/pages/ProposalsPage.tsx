@@ -265,6 +265,122 @@ function TemplateManager() {
   )
 }
 
+// ── PPT Brief Dialog ──────────────────────────────────────────────────────────
+
+function BriefDialog({ onClose }: { onClose: () => void }) {
+  const [leads, setLeads] = useState<Lead[]>([])
+  const [search, setSearch] = useState('')
+  const [selectedId, setSelectedId] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [brief, setBrief] = useState('')
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    getLeads({ limit: 200 }).then(r => {
+      const data = r.data
+      setLeads(Array.isArray(data) ? data : data?.items || [])
+    })
+  }, [])
+
+  const filtered = leads.filter(l =>
+    l.company_name.toLowerCase().includes(search.toLowerCase())
+  )
+
+  const handleGenerate = async () => {
+    if (!selectedId) return
+    setGenerating(true)
+    setBrief('')
+    try {
+      const res = await generatePptBrief(selectedId)
+      setBrief(res.data.brief)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(`生成失敗：${msg || String(err)}`)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>🖼️ 簡報背景資料</DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground">
+          AI 根據廠商資料生成結構化簡報素材，複製後貼入 <strong>Gamma.app</strong>、<strong>Canva AI</strong> 等工具即可自動產出簡報。
+        </p>
+        <div className="space-y-3">
+          <div>
+            <Label>選擇客戶 *</Label>
+            <Input
+              className="mt-1 mb-1"
+              placeholder="搜尋公司名稱..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <Select value={selectedId} onValueChange={setSelectedId}>
+              <SelectTrigger className="mt-1">
+                <SelectValue placeholder="請選擇客戶" />
+              </SelectTrigger>
+              <SelectContent className="max-h-52">
+                {filtered.slice(0, 50).map(l => (
+                  <SelectItem key={l.id} value={l.id}>
+                    {l.company_name}
+                    {l.industry ? ` · ${l.industry}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <Button
+            onClick={handleGenerate}
+            disabled={!selectedId || generating}
+            className="w-full"
+          >
+            {generating
+              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+              : '✨ 生成簡報背景資料'}
+          </Button>
+
+          {brief && (
+            <div className="space-y-3">
+              <textarea
+                value={brief}
+                onChange={e => setBrief(e.target.value)}
+                rows={18}
+                className="w-full text-sm font-mono border rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">可直接編輯後再複製</p>
+                <button
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${copied ? 'bg-green-50 text-green-700 border-green-200' : 'hover:bg-slate-50'}`}
+                  onClick={() => {
+                    navigator.clipboard.writeText(brief)
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  }}
+                >
+                  {copied
+                    ? <><CheckCheck className="w-3.5 h-3.5" />已複製！</>
+                    : <><Copy className="w-3.5 h-3.5" />複製全部</>}
+                </button>
+              </div>
+              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
+                <p className="font-medium">貼入以下工具即可產出簡報：</p>
+                <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
+                <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
+                <p>• <strong>ChatGPT / Claude</strong> → 要求轉換為 PPT 大綱</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ── Generate Dialog ───────────────────────────────────────────────────────────
 
 function GenerateDialog({
@@ -640,10 +756,6 @@ function ProposalDetailModal({
   const [openPhases, setOpenPhases] = useState<Set<number>>(new Set([0]))
   const [copied, setCopied] = useState<'subject' | 'body' | null>(null)
   const [downloading, setDownloading] = useState(false)
-  const [showBriefPanel, setShowBriefPanel] = useState(false)
-  const [pptBrief, setPptBrief] = useState('')
-  const [generatingBrief, setGeneratingBrief] = useState(false)
-  const [briefCopied, setBriefCopied] = useState(false)
 
   const handleDownloadPptx = async () => {
     setDownloading(true)
@@ -662,20 +774,6 @@ function ProposalDetailModal({
       alert(`PPT 下載失敗：${detail}`)
     } finally {
       setDownloading(false)
-    }
-  }
-
-  const handleGenerateBrief = async () => {
-    setGeneratingBrief(true)
-    setPptBrief('')
-    try {
-      const res = await generatePptBrief(proposal.lead_id)
-      setPptBrief(res.data.brief)
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`簡報資料生成失敗：${msg || String(err)}`)
-    } finally {
-      setGeneratingBrief(false)
     }
   }
 
@@ -741,14 +839,6 @@ function ProposalDetailModal({
                 : <Download className="w-3 h-3" />}
               下載 PPT
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-6 text-xs gap-1"
-              onClick={() => { setShowBriefPanel(v => !v); if (!showBriefPanel) setPptBrief('') }}
-            >
-              🖼️ 簡報資料
-            </Button>
             {proposal.status === 'draft' && (
               <Button
                 size="sm"
@@ -799,57 +889,6 @@ function ProposalDetailModal({
             )
           })}
         </div>
-
-        {/* PPT Brief Panel */}
-        {showBriefPanel && (
-          <div className="border rounded-lg overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b">
-              <span className="text-sm font-semibold text-slate-700">🖼️ 簡報背景資料</span>
-              <p className="text-xs text-slate-400">複製後貼入 Gamma.app / Canva AI 即可產出簡報</p>
-            </div>
-            <div className="p-4 space-y-3">
-              <button
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
-                onClick={handleGenerateBrief}
-                disabled={generatingBrief}
-              >
-                {generatingBrief
-                  ? <><Loader2 className="w-4 h-4 animate-spin" />生成中...</>
-                  : '✨ 生成簡報背景資料'}
-              </button>
-
-              {pptBrief && (
-                <>
-                  <textarea
-                    value={pptBrief}
-                    onChange={e => setPptBrief(e.target.value)}
-                    rows={18}
-                    className="w-full text-sm font-mono border rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
-                  />
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-slate-400">可直接編輯後再複製</p>
-                    <button
-                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${briefCopied ? 'bg-green-50 text-green-700 border-green-200' : 'hover:bg-slate-50'}`}
-                      onClick={() => {
-                        navigator.clipboard.writeText(pptBrief)
-                        setBriefCopied(true)
-                        setTimeout(() => setBriefCopied(false), 2000)
-                      }}
-                    >
-                      {briefCopied ? <><CheckCheck className="w-3.5 h-3.5" />已複製！</> : <><Copy className="w-3.5 h-3.5" />複製全部</>}
-                    </button>
-                  </div>
-                  <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
-                    <p className="font-medium">貼入以下工具即可產出簡報：</p>
-                    <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
-                    <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
-                    <p>• <strong>ChatGPT / Claude</strong> → 要求轉換為 PPT 大綱</p>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
 
         {/* Companion email */}
         {(proposal.email_subject || proposal.email_body) && (
@@ -905,6 +944,7 @@ export default function ProposalsPage() {
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [loading, setLoading] = useState(true)
   const [showGenerate, setShowGenerate] = useState(false)
+  const [showBrief, setShowBrief] = useState(false)
   const [viewing, setViewing] = useState<Proposal | null>(null)
   const [search, setSearch] = useState('')
 
@@ -940,9 +980,14 @@ export default function ProposalsPage() {
           <h1 className="text-xl font-bold">提案管理</h1>
           <p className="text-sm text-muted-foreground mt-0.5">AI 自動產生 5 階段數位行銷提案簡報</p>
         </div>
-        <Button onClick={() => setShowGenerate(true)}>
-          <Plus className="w-4 h-4 mr-1.5" /> 產生提案
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowBrief(true)}>
+            🖼️ 簡報資料
+          </Button>
+          <Button onClick={() => setShowGenerate(true)}>
+            <Plus className="w-4 h-4 mr-1.5" /> 產生提案
+          </Button>
+        </div>
       </div>
 
       <TemplateManager />
@@ -1011,6 +1056,10 @@ export default function ProposalsPage() {
           onClose={() => setShowGenerate(false)}
           onGenerated={load}
         />
+      )}
+
+      {showBrief && (
+        <BriefDialog onClose={() => setShowBrief(false)} />
       )}
 
       {viewing && (
