@@ -126,6 +126,7 @@ async def lifespan(app: FastAPI):
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS tax_id VARCHAR(20)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS representative_name VARCHAR(255)"))
             conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS capital_amount VARCHAR(50)"))
+            conn.execute(text("ALTER TABLE leads ADD COLUMN IF NOT EXISTS department VARCHAR(255)"))
             # Team-based RBAC
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS teams (
@@ -152,9 +153,75 @@ async def lifespan(app: FastAPI):
                     updated_at TIMESTAMP DEFAULT NOW()
                 )
             """))
+            conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS threads_cookie TEXT"))
             conn.commit()
     except Exception as e:
         print(f"Migration skip: {e}")
+
+    # Migration: add team_lead enum value (separate commit required for PG enum changes)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TYPE userrole ADD VALUE IF NOT EXISTS 'team_lead'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] team_lead enum: {e}")
+
+    # Migration: create teams and assign user roles
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("""
+                INSERT INTO teams (id, name, created_at)
+                VALUES
+                    (gen_random_uuid(), 'Cindy組', NOW()),
+                    (gen_random_uuid(), 'Keira組', NOW()),
+                    (gen_random_uuid(), 'Jerry組', NOW())
+                ON CONFLICT (name) DO NOTHING
+            """))
+            conn.commit()
+
+            # Ivy → manager（看全部資料）
+            conn.execute(text("UPDATE users SET role = 'manager' WHERE email = 'ivy.chang@wavenet.com.tw'"))
+
+            # Cindy 為 team_lead，Cindy組
+            conn.execute(text("""
+                UPDATE users SET role = 'team_lead',
+                    team_id = (SELECT id FROM teams WHERE name = 'Cindy組')
+                WHERE email = 'cindy.tang@wavenet.com.tw'
+            """))
+            conn.execute(text("""
+                UPDATE users SET role = 'sales',
+                    team_id = (SELECT id FROM teams WHERE name = 'Cindy組')
+                WHERE email IN ('enzo.chou@wavenet.com.tw', 'eric.chen@wavenet.com.tw')
+            """))
+
+            # Keira 為 team_lead，Keira組
+            conn.execute(text("""
+                UPDATE users SET role = 'team_lead',
+                    team_id = (SELECT id FROM teams WHERE name = 'Keira組')
+                WHERE email = 'keira.lee@wavenet.com.tw'
+            """))
+            conn.execute(text("""
+                UPDATE users SET role = 'sales',
+                    team_id = (SELECT id FROM teams WHERE name = 'Keira組')
+                WHERE email IN ('otis.jian@wavenet.com.tw', 'aiko.chang@wavenet.com.tw', 'chenyu.hsiao@wavenet.com.tw')
+            """))
+
+            # Jerry Wu 為 team_lead，Jerry組
+            conn.execute(text("""
+                UPDATE users SET role = 'team_lead',
+                    team_id = (SELECT id FROM teams WHERE name = 'Jerry組')
+                WHERE email = 'jerry.wu@wavenet.com.tw'
+            """))
+            conn.execute(text("""
+                UPDATE users SET role = 'sales',
+                    team_id = (SELECT id FROM teams WHERE name = 'Jerry組')
+                WHERE email IN ('sophie.wu@wavenet.com.tw', 'linda.cai@wavenet.com.tw')
+            """))
+
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] team setup: {e}")
+
     yield
 
 

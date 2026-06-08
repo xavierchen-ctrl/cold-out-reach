@@ -20,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame } from 'lucide-react'
+import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame, Paperclip, X } from 'lucide-react'
 import { format } from 'date-fns'
 
 const CADENCE_STEP_ICONS: Record<string, string> = {
@@ -120,6 +120,8 @@ export default function LeadDetailPage() {
   const [sendingEmail, setSendingEmail] = useState(false)
   const [scheduleMode, setScheduleMode] = useState(false)
   const [scheduledAt, setScheduledAt] = useState('')
+  const [emailAttachments, setEmailAttachments] = useState<File[]>([])
+  const emailFileInputRef = useRef<HTMLInputElement>(null)
 
   const loadLead = useCallback(async () => {
     if (!id) return
@@ -327,6 +329,16 @@ export default function LeadDetailPage() {
     }
   }
 
+  const encodeEmailAttachments = async (files: File[]) => {
+    return Promise.all(files.map(async (file) => {
+      const buffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(buffer)
+      let binary = ''
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+      return { filename: file.name, content: btoa(binary), mime_type: file.type || 'application/octet-stream' }
+    }))
+  }
+
   const handleSendEmail = async () => {
     if (!id) return
     setSendingEmail(true)
@@ -341,10 +353,13 @@ export default function LeadDetailPage() {
           template_id: selectedTemplate || undefined,
         })
         setShowEmail(false)
+        setEmailAttachments([])
         alert('✅ 已排程發送')
       } else {
-        await sendEmail({ lead_id: id, to: emailTo, subject: emailSubject, body: emailBody })
+        const attachments = emailAttachments.length > 0 ? await encodeEmailAttachments(emailAttachments) : undefined
+        await sendEmail({ lead_id: id, to: emailTo, subject: emailSubject, body: emailBody, attachments })
         setShowEmail(false)
+        setEmailAttachments([])
         await loadActivities()
         alert('郵件已送出')
       }
@@ -1028,6 +1043,7 @@ export default function LeadDetailPage() {
                 { label: '統編', key: 'tax_id' },
                 { label: '資本總額(元)', key: 'capital_amount' },
                 { label: '聯絡人', key: 'contact_name' },
+                { label: '部門', key: 'department' },
                 { label: '職稱', key: 'title' },
                 { label: 'Email', key: 'email' },
                 { label: '電話', key: 'phone' },
@@ -1421,7 +1437,7 @@ export default function LeadDetailPage() {
       }
 
       {/* Email Modal */}
-      <Dialog open={showEmail} onOpenChange={setShowEmail}>
+      <Dialog open={showEmail} onOpenChange={v => { setShowEmail(v); if (!v) setEmailAttachments([]) }}>
         <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>發送郵件</DialogTitle></DialogHeader>
           <div className="space-y-3">
@@ -1486,6 +1502,51 @@ export default function LeadDetailPage() {
             <div>
               <Label>內文</Label>
               <Textarea value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={8} className="mt-1" />
+            </div>
+
+            {/* Attachments */}
+            <div>
+              <Label className="flex items-center gap-1.5">
+                <Paperclip className="w-3.5 h-3.5" /> 附件
+              </Label>
+              <input
+                ref={emailFileInputRef}
+                type="file"
+                multiple
+                className="hidden"
+                onChange={e => {
+                  if (e.target.files) {
+                    setEmailAttachments(prev => [...prev, ...Array.from(e.target.files!)])
+                    e.target.value = ''
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => emailFileInputRef.current?.click()}
+                className="mt-1 w-full border-2 border-dashed border-muted-foreground/30 rounded-md py-2 text-sm text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
+              >
+                點擊選擇檔案（可多選）
+              </button>
+              <p className="text-xs text-muted-foreground mt-1">單檔上限 25 MB，所有附件合計請勿超過 25 MB（Gmail 限制）</p>
+              {emailAttachments.length > 0 && (
+                <div className="mt-2 space-y-1">
+                  {emailAttachments.map((file, i) => (
+                    <div key={i} className="flex items-center gap-2 text-sm bg-muted/50 rounded px-2 py-1">
+                      <Paperclip className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+                      <span className="flex-1 truncate">{file.name}</span>
+                      <span className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</span>
+                      <button
+                        type="button"
+                        onClick={() => setEmailAttachments(prev => prev.filter((_, idx) => idx !== i))}
+                        className="text-muted-foreground hover:text-destructive"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Schedule option */}

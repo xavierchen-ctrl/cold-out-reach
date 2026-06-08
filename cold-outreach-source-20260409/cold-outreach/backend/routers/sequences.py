@@ -224,7 +224,7 @@ BODY:
 <內文>"""
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         resp = model.generate_content(prompt)
         text = resp.text.strip()
         if "SUBJECT:" in text and "BODY:" in text:
@@ -295,3 +295,4 @@ def skip_pending(
     pe.status = "skipped"
     db.commit()
     return {"message": "skipped"}
+

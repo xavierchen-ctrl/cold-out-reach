@@ -72,7 +72,7 @@ BODY:
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         text = response.text.strip()
     except Exception as e:
@@ -323,7 +323,7 @@ async def _scrape_contact_info(website: str) -> dict:
 {snippet}"""
                 try:
                     genai.configure(api_key=GEMINI_API_KEY)
-                    model = genai.GenerativeModel("gemini-2.5-flash")
+                    model = genai.GenerativeModel("gemini-2.0-flash")
                     resp = model.generate_content(prompt)
                     raw = resp.text.strip()
                     raw = _re.sub(r'^```json\s*', '', raw)
@@ -370,7 +370,7 @@ async def enrich_company(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         text = response.text.strip()
         if text.startswith("```"):
@@ -479,7 +479,7 @@ def pipeline_health(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         return {"report": response.text.strip()}
     except Exception as e:
@@ -646,7 +646,7 @@ BODY:
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         text = response.text.strip()
     except Exception as e:
@@ -765,7 +765,7 @@ async def generate_proposal(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         response = model.generate_content(prompt)
         raw = response.text.strip()
         raw = re.sub(r'^```json\s*', '', raw)
@@ -781,3 +781,4 @@ async def generate_proposal(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+

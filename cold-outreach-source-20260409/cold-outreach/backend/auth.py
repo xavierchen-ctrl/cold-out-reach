@@ -30,12 +30,13 @@ ALLOWED_EMAILS = {
 
 
 def get_visible_user_ids(current_user, db) -> list | None:
-    """None = unrestricted (admin). Otherwise returns list of visible user IDs."""
-    if current_user.role == UserRole.admin:
-        return None
-    if current_user.role == UserRole.manager:
+    """None = unrestricted. Otherwise returns list of visible user IDs."""
+    if current_user.role in (UserRole.admin, UserRole.manager):
+        return None  # admin & manager 可看全部
+    if current_user.role == UserRole.team_lead:
+        # 小組長：看自己組所有成員（含自己）
         return [u.id for u in db.query(User).filter(User.team_id == current_user.team_id).all()]
-    return [current_user.id]
+    return [current_user.id]  # sales：只看自己
 
 
 def is_allowed_email(email: str) -> bool:

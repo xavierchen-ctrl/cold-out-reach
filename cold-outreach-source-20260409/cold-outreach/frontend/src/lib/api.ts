@@ -59,7 +59,14 @@ export const createActivity = (leadId: string, data: Record<string, unknown>) =>
 
 // ── Gmail ─────────────────────────────────────────────────────────────────────
 export const getGmailAuthUrl = () => api.get('/gmail/auth')
+export const getGmailStatus = () => api.get('/gmail/status')
+export const disconnectGmail = () => api.delete('/gmail/disconnect')
+export const getThreadsCookieStatus = () => api.get('/auth/me/threads-cookie')
+export const saveThreadsCookie = (session_id: string) => api.post('/auth/me/threads-cookie', { session_id })
+export const deleteThreadsCookie = () => api.delete('/auth/me/threads-cookie')
 export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/send', data)
+export const bulkSendEmail = (lead_ids: string[], subject: string, body: string) =>
+  api.post('/gmail/bulk-send', { lead_ids, subject, body })
 
 // ── AI ────────────────────────────────────────────────────────────────────────
 export const generateDraft = (lead_id: string, template_type: string, customer_background?: string) =>
@@ -109,8 +116,12 @@ export const runScraper = (source: string, url?: string, keyword?: string, indus
 export const getScraperJobs = () => api.get('/scraper/jobs')
 export const previewScraperJob = (jobId: string) =>
   api.get(`/scraper/preview/${jobId}`)
-export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean) =>
-  api.post(`/scraper/import/${jobId}`, { assigned_to, email_only })
+export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean, indices?: number[]) =>
+  api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
+export const findCompanyWebsite = (q: string) =>
+  api.get(`/scraper/find-website`, { params: { q } })
+export const updateScraperJobField = (jobId: string, index: number, field: string, value: string | null) =>
+  api.patch(`/scraper/jobs/${jobId}/update-field`, { index, field, value })
 
 // ── Templates ─────────────────────────────────────────────────────────────────
 export const getTemplates = () => api.get('/templates')

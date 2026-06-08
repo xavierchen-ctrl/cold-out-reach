@@ -3,20 +3,27 @@ import json
 import base64
 import re
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from database import get_db
 from models import User, Lead, LeadActivity, ActivityType, LeadStatus
-from schemas import SendEmailRequest
+from schemas import SendEmailRequest, BulkSendRequest
 from auth import get_current_user
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.send",
+    "openid",
+    "https://www.googleapis.com/auth/userinfo.email",
+]
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
@@ -63,11 +70,65 @@ def gmail_callback(code: str, state: str, db: Session = Depends(get_db)):
         "client_secret": creds.client_secret,
         "scopes": list(creds.scopes) if creds.scopes else [],
     }
+
+    # 取得使用者的 Gmail 信箱
+    try:
+        import requests as _req
+        r = _req.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {creds.token}"},
+            timeout=5,
+        )
+        if r.status_code == 200:
+            token_data["email"] = r.json().get("email", "")
+    except Exception:
+        pass
+
     user = db.query(User).filter(User.id == state).first()
     if user:
         user.gmail_token = json.dumps(token_data)
         db.commit()
-    return RedirectResponse(url="/leads")
+
+    gmail_email = token_data.get("email", "")
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Gmail 綁定成功</title></head>
+<body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9fafb;">
+  <div style="text-align:center;padding:2rem;background:white;border-radius:12px;box-shadow:0 2px 16px rgba(0,0,0,.1)">
+    <div style="font-size:2.5rem;margin-bottom:.5rem">✅</div>
+    <h2 style="margin:0 0 .5rem;color:#111">Gmail 綁定成功</h2>
+    <p style="color:#6b7280;margin:0 0 1.5rem">{gmail_email}</p>
+    <p style="color:#9ca3af;font-size:.875rem">此視窗將自動關閉…</p>
+  </div>
+  <script>
+    if (window.opener) {{
+      window.opener.postMessage({{type:'gmail-connected',email:{json.dumps(gmail_email)}}}, '*');
+      setTimeout(() => window.close(), 1500);
+    }}
+  </script>
+</body></html>""")
+
+
+@router.get("/status")
+def gmail_status(current_user: User = Depends(get_current_user)):
+    """回傳目前使用者的 Gmail 綁定狀態"""
+    if not current_user.gmail_token:
+        return {"connected": False, "email": None}
+    try:
+        token_data = json.loads(current_user.gmail_token)
+        return {"connected": True, "email": token_data.get("email")}
+    except Exception:
+        return {"connected": False, "email": None}
+
+
+@router.delete("/disconnect")
+def gmail_disconnect(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """解除 Gmail 綁定"""
+    current_user.gmail_token = None
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/send")
@@ -91,7 +152,20 @@ def send_email(
 
     try:
         service = build("gmail", "v1", credentials=creds)
-        msg = MIMEText(body.body, "plain", "utf-8")
+
+        if body.attachments:
+            msg = MIMEMultipart()
+            msg.attach(MIMEText(body.body, "plain", "utf-8"))
+            for att in body.attachments:
+                mime_main, mime_sub = (att.mime_type + "/octet-stream").split("/", 1)[:2] if "/" in att.mime_type else ("application", "octet-stream")
+                part = MIMEBase(mime_main, mime_sub)
+                part.set_payload(base64.b64decode(att.content))
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=att.filename)
+                msg.attach(part)
+        else:
+            msg = MIMEText(body.body, "plain", "utf-8")
+
         msg["To"] = body.to
         msg["Subject"] = body.subject
         raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
@@ -112,6 +186,75 @@ def send_email(
         db.commit()
 
     return {"message": "sent"}
+
+
+def _replace_vars(text: str, lead: Lead) -> str:
+    return (text
+        .replace("{{company_name}}", lead.company_name or "")
+        .replace("{{contact_name}}", lead.contact_name or "您好")
+        .replace("{{industry}}", lead.industry or "")
+        .replace("{{city}}", lead.city or "")
+        .replace("{{title}}", lead.title or "")
+        .replace("{{email}}", lead.email or "")
+    )
+
+
+@router.post("/bulk-send")
+def bulk_send_email(
+    body: BulkSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """合併列印群發：對每位名單個別套入變數後發送"""
+    if not current_user.gmail_token:
+        raise HTTPException(status_code=400, detail="Gmail not connected. Please authorize first.")
+    if len(body.lead_ids) > 200:
+        raise HTTPException(status_code=400, detail="單次群發上限 200 封")
+
+    token_data = json.loads(current_user.gmail_token)
+    creds = Credentials(
+        token=token_data["token"],
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get("client_id"),
+        client_secret=token_data.get("client_secret"),
+        scopes=token_data.get("scopes"),
+    )
+    service = build("gmail", "v1", credentials=creds)
+
+    import time
+    sent, failed, errors = 0, 0, []
+
+    for lead_id in body.lead_ids:
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead or not lead.email:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": "無 Email"})
+            continue
+        try:
+            subject = _replace_vars(body.subject, lead)
+            content = _replace_vars(body.body, lead)
+            msg = MIMEText(content, "plain", "utf-8")
+            msg["To"] = lead.email
+            msg["Subject"] = subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+            activity = LeadActivity(
+                lead_id=lead.id,
+                type=ActivityType.email_sent,
+                content=f"To: {lead.email}\nSubject: {subject}\n\n{content}",
+                created_by=current_user.id,
+            )
+            db.add(activity)
+            db.commit()
+            sent += 1
+            time.sleep(0.3)
+        except Exception as e:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": str(e)})
+
+    return {"sent": sent, "failed": failed, "errors": errors}
 
 
 @router.post("/check_replies")

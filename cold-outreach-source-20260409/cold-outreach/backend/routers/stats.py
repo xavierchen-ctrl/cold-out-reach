@@ -192,7 +192,7 @@ def ai_suggestions(
 給出具體、可執行的今日行動建議："""
         try:
             genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel("gemini-2.5-flash")
+            model = genai.GenerativeModel("gemini-2.0-flash")
             resp = model.generate_content(prompt)
             lines = [l.strip() for l in resp.text.strip().split("\n") if l.strip().startswith("•")]
             suggestions = [l.lstrip("•").strip() for l in lines] or [resp.text.strip()]
@@ -259,7 +259,7 @@ def pipeline_health_cached(
 
     try:
         genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        model = genai.GenerativeModel("gemini-2.0-flash")
         resp = model.generate_content(prompt)
         report = resp.text.strip()
     except Exception as e:
@@ -267,3 +267,4 @@ def pipeline_health_cached(
 
     _pipeline_health_cache = {"ts": time.time(), "data": report}
     return {"report": report}
+

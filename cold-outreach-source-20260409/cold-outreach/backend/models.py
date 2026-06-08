@@ -12,6 +12,7 @@ from utils import now_tw
 class UserRole(str, enum.Enum):
     admin = "admin"
     manager = "manager"
+    team_lead = "team_lead"
     sales = "sales"
 
 
@@ -61,6 +62,7 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False, default=UserRole.sales)
     gmail_token = Column(Text, nullable=True)
+    threads_cookie = Column(Text, nullable=True)
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
     created_at = Column(DateTime, default=now_tw)
 
@@ -75,6 +77,7 @@ class Lead(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     company_name = Column(String(255), nullable=False)
     contact_name = Column(String(255), nullable=True)
+    department = Column(String(255), nullable=True)
     title = Column(String(255), nullable=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(50), nullable=True)

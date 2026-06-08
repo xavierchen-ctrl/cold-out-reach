@@ -1,13 +1,13 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getWebhooks, createWebhook, updateWebhook, deleteWebhook, testWebhook, getWebhookLogs, getNotificationSettings, testNotification, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword } from '@/lib/api'
-import { Tag, Webhook, WebhookLog, User as UserType, Team } from '@/types'
+import { getTags, createTag, deleteTag, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail, getThreadsCookieStatus, saveThreadsCookie, deleteThreadsCookie } from '@/lib/api'
+import { Tag, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Trash2, Plus, Globe, Tag as TagIcon, Bell, User, TestTube2, Zap, Users, Eye, EyeOff } from 'lucide-react'
+import { Trash2, Plus, Tag as TagIcon, User, Users, Eye, EyeOff, Mail, CheckCircle2, XCircle } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 
 function PasswordInput({ value, onChange, placeholder, className }: {
@@ -43,11 +43,7 @@ const PRESET_COLORS = [
   '#8b5cf6', '#ef4444', '#06b6d4', '#84cc16', '#f97316',
 ]
 
-const WEBHOOK_EVENTS = [
-  'lead.status_changed', 'lead.won', 'lead.lost', 'email.replied', 'meeting.scheduled',
-]
-
-type SettingsTab = 'tags' | 'webhooks' | 'line' | 'profile' | 'users' | 'teams'
+type SettingsTab = 'tags' | 'profile' | 'users' | 'teams'
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -55,8 +51,6 @@ export default function SettingsPage() {
 
   const tabs = [
     { key: 'tags', label: '標籤管理', icon: TagIcon },
-    { key: 'webhooks', label: 'Webhook', icon: Globe },
-    { key: 'line', label: 'LINE Notify', icon: Bell },
     { key: 'profile', label: '個人資料', icon: User },
     ...(user?.role === 'admin' ? [
       { key: 'users', label: '帳號管理', icon: Users },
@@ -81,8 +75,6 @@ export default function SettingsPage() {
         ))}
       </div>
       {tab === 'tags' && <TagsTab />}
-      {tab === 'webhooks' && <WebhooksTab />}
-      {tab === 'line' && <LineNotifyTab />}
       {tab === 'profile' && <ProfileTab />}
       {tab === 'users' && user?.role === 'admin' && <UsersTab currentUserId={user.id} />}
       {tab === 'teams' && user?.role === 'admin' && <TeamsTab />}
@@ -190,264 +182,6 @@ function TagsTab() {
           </div>
         </DialogContent>
       </Dialog>
-    </div>
-  )
-}
-
-// ── Webhooks Tab ──────────────────────────────────────────────────────────────
-function WebhooksTab() {
-  const [webhooks, setWebhooks] = useState<Webhook[]>([])
-  const [showCreate, setShowCreate] = useState(false)
-  const [newUrl, setNewUrl] = useState('')
-  const [newName, setNewName] = useState('')
-  const [newEvents, setNewEvents] = useState<string[]>([])
-  const [newSecret, setNewSecret] = useState('')
-  const [creating, setCreating] = useState(false)
-  const [selectedWebhookLogs, setSelectedWebhookLogs] = useState<{ webhook: Webhook; logs: WebhookLog[] } | null>(null)
-
-  const loadWebhooks = async () => {
-    const res = await getWebhooks()
-    setWebhooks(Array.isArray(res.data) ? res.data : [])
-  }
-  useEffect(() => { loadWebhooks() }, [])
-
-  const handleCreate = async () => {
-    if (!newUrl.trim()) return
-    setCreating(true)
-    try {
-      await createWebhook({ name: newName, url: newUrl, events: newEvents, secret: newSecret || undefined })
-      setNewUrl('')
-      setNewName('')
-      setNewEvents([])
-      setNewSecret('')
-      setShowCreate(false)
-      await loadWebhooks()
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      alert(err?.response?.data?.detail || '建立失敗')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const handleTest = async (id: string) => {
-    try {
-      const res = await testWebhook(id)
-      alert(res.data.message)
-    } catch {
-      alert('測試失敗')
-    }
-  }
-
-  const handleDelete = async (id: string) => {
-    if (!confirm('確定刪除此 Webhook？')) return
-    await deleteWebhook(id)
-    await loadWebhooks()
-  }
-
-  const handleToggle = async (webhook: Webhook) => {
-    await updateWebhook(webhook.id, { is_active: !webhook.is_active })
-    await loadWebhooks()
-  }
-
-  const handleViewLogs = async (webhook: Webhook) => {
-    const res = await getWebhookLogs(webhook.id)
-    setSelectedWebhookLogs({ webhook, logs: res.data })
-  }
-
-  const toggleEvent = (event: string) => {
-    setNewEvents(prev => prev.includes(event) ? prev.filter(e => e !== event) : [...prev, event])
-  }
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">Webhook 管理</h2>
-        <Button size="sm" onClick={() => setShowCreate(true)}>
-          <Plus className="w-4 h-4 mr-1" /> 新增 Webhook
-        </Button>
-      </div>
-
-      <div className="space-y-3">
-        {webhooks.map(wh => (
-          <div key={wh.id} className="border rounded-lg p-4 bg-white">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm">{wh.name || '未命名'}</span>
-                  <Badge variant={wh.is_active ? 'default' : 'outline'} className="text-xs">
-                    {wh.is_active ? '啟用' : '停用'}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1 font-mono">{wh.url}</p>
-                <div className="flex gap-1 mt-2 flex-wrap">
-                  {(wh.events || []).map(ev => (
-                    <span key={ev} className="text-xs bg-gray-100 px-2 py-0.5 rounded">{ev}</span>
-                  ))}
-                </div>
-              </div>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => handleTest(wh.id)}>
-                  <TestTube2 className="w-3.5 h-3.5" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleViewLogs(wh)}>記錄</Button>
-                <Button variant="outline" size="sm" onClick={() => handleToggle(wh)}>
-                  {wh.is_active ? '停用' : '啟用'}
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleDelete(wh.id)} className="text-red-500">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        ))}
-        {webhooks.length === 0 && (
-          <div className="text-center py-8 text-muted-foreground text-sm border rounded-lg bg-white">
-            尚無 Webhook，點擊「新增 Webhook」開始設定
-          </div>
-        )}
-      </div>
-
-      <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader><DialogTitle>新增 Webhook</DialogTitle></DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>名稱（選填）</Label>
-              <Input value={newName} onChange={e => setNewName(e.target.value)} placeholder="例如：Slack 通知" className="mt-1" />
-            </div>
-            <div>
-              <Label>Webhook URL *</Label>
-              <Input value={newUrl} onChange={e => setNewUrl(e.target.value)} placeholder="https://hooks.slack.com/..." className="mt-1" />
-            </div>
-            <div>
-              <Label>觸發事件</Label>
-              <div className="grid grid-cols-2 gap-2 mt-2">
-                {WEBHOOK_EVENTS.map(ev => (
-                  <label key={ev} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" checked={newEvents.includes(ev)} onChange={() => toggleEvent(ev)} />
-                    <span className="font-mono text-xs">{ev}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div>
-              <Label>簽名 Secret（選填）</Label>
-              <Input value={newSecret} onChange={e => setNewSecret(e.target.value)} placeholder="用於 HMAC 驗證" className="mt-1" />
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setShowCreate(false)}>取消</Button>
-              <Button onClick={handleCreate} disabled={creating || !newUrl.trim()}>
-                {creating ? '建立中...' : '建立'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Logs Dialog */}
-      {selectedWebhookLogs && (
-        <Dialog open={true} onOpenChange={() => setSelectedWebhookLogs(null)}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>Webhook 記錄 — {selectedWebhookLogs.webhook.name || '未命名'}</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {selectedWebhookLogs.logs.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">尚無記錄</p>
-              ) : selectedWebhookLogs.logs.map(log => (
-                <div key={log.id} className="border rounded p-3 text-xs">
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="font-mono font-medium">{log.event}</span>
-                    <div className="flex items-center gap-2">
-                      <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                        (log.response_status ?? 0) >= 200 && (log.response_status ?? 0) < 300 
-                          ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}>
-                        {log.response_status || '失敗'}
-                      </span>
-                      <span className="text-muted-foreground">{new Date(log.created_at).toLocaleString('zh-TW')}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-    </div>
-  )
-}
-
-// ── LINE Notify Tab ───────────────────────────────────────────────────────────
-function LineNotifyTab() {
-  const [settings, setSettings] = useState<{ line_notify_configured: boolean; line_notify_token_preview: string | null; triggers: string[] } | null>(null)
-  const [testMsg, setTestMsg] = useState('🧪 Cold Outreach 測試通知')
-  const [testing, setTesting] = useState(false)
-
-  useEffect(() => {
-    getNotificationSettings().then(r => setSettings(r.data)).catch(() => {})
-  }, [])
-
-  const handleTest = async () => {
-    setTesting(true)
-    try {
-      await testNotification(testMsg)
-      alert('✅ 通知已發送')
-    } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      alert(err?.response?.data?.detail || '發送失敗')
-    } finally {
-      setTesting(false)
-    }
-  }
-
-  return (
-    <div>
-      <h2 className="text-lg font-semibold mb-4">LINE Notify 設定</h2>
-      <div className="bg-white border rounded-lg p-5 space-y-4 max-w-lg">
-        <div className="flex items-center gap-2">
-          <Zap className={`w-5 h-5 ${settings?.line_notify_configured ? 'text-green-500' : 'text-gray-400'}`} />
-          <span className="text-sm font-medium">
-            狀態：{settings?.line_notify_configured ? (
-              <span className="text-green-600">已設定</span>
-            ) : (
-              <span className="text-red-500">未設定</span>
-            )}
-          </span>
-          {settings?.line_notify_token_preview && (
-            <span className="text-xs text-muted-foreground font-mono">({settings.line_notify_token_preview})</span>
-          )}
-        </div>
-
-        {!settings?.line_notify_configured && (
-          <div className="text-sm text-muted-foreground bg-yellow-50 border border-yellow-200 rounded p-3">
-            <p className="font-medium mb-1">設定方式：</p>
-            <p>在後端環境變數中設定 <code className="bg-yellow-100 px-1 rounded">LINE_NOTIFY_TOKEN</code></p>
-            <p className="mt-1">取得 token：<a href="https://notify-bot.line.me/my/" target="_blank" rel="noopener noreferrer" className="text-blue-500 underline">LINE Notify 官方頁面</a></p>
-          </div>
-        )}
-
-        <div>
-          <Label>觸發事件</Label>
-          <div className="mt-1 space-y-1">
-            {(settings?.triggers || ['won', 'meeting_scheduled']).map(t => (
-              <div key={t} className="flex items-center gap-2 text-sm">
-                <span className="w-2 h-2 rounded-full bg-green-400 flex-shrink-0" />
-                <span>{t === 'won' ? '成交' : t === 'meeting_scheduled' ? '會議確認' : t}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div>
-          <Label>測試訊息</Label>
-          <Input value={testMsg} onChange={e => setTestMsg(e.target.value)} className="mt-1" />
-        </div>
-        <Button onClick={handleTest} disabled={testing || !settings?.line_notify_configured}>
-          {testing ? '發送中...' : '發送測試通知'}
-        </Button>
-      </div>
     </div>
   )
 }
@@ -854,6 +588,197 @@ function TeamsTab() {
   )
 }
 
+// ── Gmail Binding Card ────────────────────────────────────────────────────────
+function GmailBindingCard() {
+  const [connected, setConnected] = useState(false)
+  const [gmailEmail, setGmailEmail] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [disconnecting, setDisconnecting] = useState(false)
+
+  const loadStatus = async () => {
+    try {
+      const res = await getGmailStatus()
+      setConnected(res.data.connected)
+      setGmailEmail(res.data.email)
+    } catch {
+      setConnected(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadStatus()
+    const handler = (e: MessageEvent) => {
+      if (e.data?.type === 'gmail-connected') {
+        setConnected(true)
+        setGmailEmail(e.data.email || null)
+      }
+    }
+    window.addEventListener('message', handler)
+    return () => window.removeEventListener('message', handler)
+  }, [])
+
+  const handleConnect = async () => {
+    try {
+      const res = await getGmailAuthUrl()
+      window.open(res.data.auth_url, '_blank', 'width=520,height=620,noopener')
+    } catch {
+      alert('無法取得授權連結，請確認 Google OAuth 設定')
+    }
+  }
+
+  const handleDisconnect = async () => {
+    if (!confirm('確定要解除 Gmail 綁定嗎？')) return
+    setDisconnecting(true)
+    try {
+      await disconnectGmail()
+      setConnected(false)
+      setGmailEmail(null)
+    } finally {
+      setDisconnecting(false)
+    }
+  }
+
+  return (
+    <div className="bg-white border rounded-lg p-5 max-w-md">
+      <div className="flex items-center gap-2 mb-4">
+        <Mail className="w-4 h-4 text-gray-500" />
+        <h3 className="text-sm font-medium text-gray-700">Gmail 發信帳號</h3>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">載入中...</p>
+      ) : connected ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <div>
+              <p className="font-medium">已綁定</p>
+              {gmailEmail && <p className="text-xs text-emerald-600 mt-0.5">{gmailEmail}</p>}
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleConnect}>重新授權</Button>
+            <Button variant="outline" size="sm" onClick={handleDisconnect} disabled={disconnecting}
+              className="text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200">
+              {disconnecting ? '解除中...' : '解除綁定'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+            <XCircle className="w-4 h-4 shrink-0" />
+            <span>尚未綁定 Gmail</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            綁定後即可直接從系統發送開發信，並追蹤回覆狀態。
+          </p>
+          <Button size="sm" onClick={handleConnect}>
+            <Mail className="w-3.5 h-3.5 mr-1.5" /> 綁定 Gmail
+          </Button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Threads Cookie Card ───────────────────────────────────────────────────────
+function ThreadsCookieCard() {
+  const [connected, setConnected] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [inputVal, setInputVal] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [show, setShow] = useState(false)
+
+  useEffect(() => {
+    getThreadsCookieStatus()
+      .then(r => setConnected(r.data.connected))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const handleSave = async () => {
+    if (!inputVal.trim()) return
+    setSaving(true)
+    try {
+      await saveThreadsCookie(inputVal.trim())
+      setConnected(true)
+      setInputVal('')
+      alert('✅ Threads Cookie 已儲存，下次爬蟲將以登入狀態執行')
+    } catch {
+      alert('儲存失敗')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleClear = async () => {
+    if (!confirm('確定要清除 Threads Cookie 嗎？')) return
+    await deleteThreadsCookie()
+    setConnected(false)
+  }
+
+  return (
+    <div className="bg-white border rounded-lg p-5 max-w-md">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-base">🧵</span>
+        <h3 className="text-sm font-medium text-gray-700">Threads 登入 Cookie</h3>
+      </div>
+
+      {loading ? (
+        <p className="text-sm text-muted-foreground">載入中...</p>
+      ) : connected ? (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span className="font-medium">Cookie 已設定，爬蟲將以登入狀態執行</span>
+          </div>
+          <Button variant="outline" size="sm" onClick={handleClear}
+            className="text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200">
+            清除 Cookie
+          </Button>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
+            <XCircle className="w-4 h-4 shrink-0" />
+            <span>尚未設定，爬蟲可能因登入牆取得 0 筆資料</span>
+          </div>
+          <div className="text-xs text-muted-foreground space-y-1 bg-blue-50 border border-blue-100 rounded p-3">
+            <p className="font-medium text-blue-700">如何取得 sessionid：</p>
+            <ol className="list-decimal list-inside space-y-0.5 text-blue-600">
+              <li>用 Chrome 登入 threads.net</li>
+              <li>按 F12 → Application → Cookies → threads.net</li>
+              <li>找到 <code className="bg-blue-100 px-1 rounded">sessionid</code> → 複製 Value</li>
+              <li>貼到下方欄位並儲存</li>
+            </ol>
+          </div>
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                type={show ? 'text' : 'password'}
+                value={inputVal}
+                onChange={e => setInputVal(e.target.value)}
+                placeholder="貼上 sessionid 的值"
+                className="pr-9 text-xs"
+              />
+              <button type="button" onClick={() => setShow(v => !v)}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
+                {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
+            </div>
+            <Button size="sm" onClick={handleSave} disabled={saving || !inputVal.trim()}>
+              {saving ? '儲存中...' : '儲存'}
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Profile Tab ───────────────────────────────────────────────────────────────
 function ProfileTab() {
   const [currentPw, setCurrentPw] = useState('')
@@ -895,8 +820,15 @@ function ProfileTab() {
   }
 
   return (
-    <div>
-      <h2 className="text-lg font-semibold mb-4">個人資料</h2>
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold mb-4">個人資料</h2>
+        <div className="space-y-4">
+          <GmailBindingCard />
+          <ThreadsCookieCard />
+        </div>
+      </div>
+      <div>
       <div className="bg-white border rounded-lg p-5 space-y-4 max-w-md">
         <h3 className="text-sm font-medium text-gray-700">更改密碼</h3>
         <div>
@@ -915,6 +847,7 @@ function ProfileTab() {
         <Button onClick={handleChangePw} disabled={saving || !currentPw || !newPw || !confirmPw}>
           {saving ? '更新中...' : '更改密碼'}
         </Button>
+      </div>
       </div>
     </div>
   )
