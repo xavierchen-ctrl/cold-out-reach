@@ -265,20 +265,32 @@ function TemplateManager() {
   )
 }
 
-// ── PPT Brief Dialog ──────────────────────────────────────────────────────────
+// ── Generate Dialog (merged) ───────────────────────────────────────────────────
 
-function BriefDialog({ onClose }: { onClose: () => void }) {
+function GenerateDialog({
+  onClose,
+  onGenerated,
+}: {
+  onClose: () => void
+  onGenerated: () => void
+}) {
   const [leads, setLeads] = useState<Lead[]>([])
+  const [form, setForm] = useState({
+    lead_id: '',
+    product_focus: '廣告投放',
+    budget_range: '50-100萬/月',
+    extra_context: '',
+  })
   const [search, setSearch] = useState('')
-  const [selectedId, setSelectedId] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [uploadingTemplate, setUploadingTemplate] = useState(false)
+  const [templateInfo, setTemplateInfo] = useState('')
+  const [downloadingPptx, setDownloadingPptx] = useState(false)
   const [creatingSlides, setCreatingSlides] = useState(false)
+  const [generatingBrief, setGeneratingBrief] = useState(false)
   const [brief, setBrief] = useState('')
   const [copied, setCopied] = useState(false)
   const [slidesError, setSlidesError] = useState('')
-  const [uploadingTemplate, setUploadingTemplate] = useState(false)
-  const [templateInfo, setTemplateInfo] = useState<string>('')
-  const [downloadingPptx, setDownloadingPptx] = useState(false)
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -291,33 +303,20 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
     l.company_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const handleGenerate = async () => {
-    if (!selectedId) return
+  const busy = generating || uploadingTemplate || downloadingPptx || creatingSlides || generatingBrief
+
+  const handleSaveProposal = async () => {
+    if (!form.lead_id) return
     setGenerating(true)
-    setBrief('')
     try {
-      const res = await generatePptBrief(selectedId)
-      setBrief(res.data.brief)
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`生成失敗：${msg || String(err)}`)
+      await generateProposal(form)
+      onGenerated()
+      onClose()
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(`提案產生失敗：${msg || String(e)}`)
     } finally {
       setGenerating(false)
-    }
-  }
-
-  const handleCreateSlides = async () => {
-    if (!selectedId) return
-    setCreatingSlides(true)
-    setSlidesError('')
-    try {
-      const res = await createGoogleSlides(selectedId)
-      window.open(res.data.url, '_blank')
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setSlidesError(msg || '建立失敗，請稍後再試')
-    } finally {
-      setCreatingSlides(false)
     }
   }
 
@@ -339,10 +338,10 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
   }
 
   const handleDownloadPptx = async () => {
-    if (!selectedId) return
+    if (!form.lead_id) return
     setDownloadingPptx(true)
     try {
-      const res = await generatePptxDownload(selectedId)
+      const res = await generatePptxDownload(form.lead_id)
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
       a.href = url
@@ -362,196 +361,44 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>🖼️ 簡報背景資料</DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-muted-foreground">
-          AI 根據廠商資料生成結構化簡報素材，複製後貼入 <strong>Gamma.app</strong>、<strong>Canva AI</strong> 等工具即可自動產出簡報。
-        </p>
-        <div className="space-y-3">
-          <div>
-            <Label>選擇客戶 *</Label>
-            <Input
-              className="mt-1 mb-1"
-              placeholder="搜尋公司名稱..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-            <Select value={selectedId} onValueChange={setSelectedId}>
-              <SelectTrigger className="mt-1">
-                <SelectValue placeholder="請選擇客戶" />
-              </SelectTrigger>
-              <SelectContent className="max-h-52">
-                {filtered.slice(0, 50).map(l => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.company_name}
-                    {l.industry ? ` · ${l.industry}` : ''}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* PPTX 模板上傳 */}
-          <div className="p-3 bg-slate-50 border rounded-lg space-y-2">
-            <p className="text-xs font-medium text-slate-700">📁 PPTX 設計模板（選填）</p>
-            <p className="text-xs text-muted-foreground">上傳你的 PPTX 模板，AI 會將內容套入你的設計風格</p>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs"
-                disabled={uploadingTemplate}
-                onClick={() => document.getElementById('pptx-template-input')?.click()}
-                type="button"
-              >
-                {uploadingTemplate
-                  ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />上傳中...</>
-                  : <><Upload className="w-3 h-3 mr-1" />選擇 .pptx 檔案</>}
-              </Button>
-              {templateInfo && <span className="text-xs text-green-600">✓ {templateInfo}</span>}
-            </label>
-            <input
-              id="pptx-template-input"
-              type="file"
-              accept=".pptx"
-              className="hidden"
-              onChange={handleUploadTemplate}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <Button
-              onClick={handleGenerate}
-              disabled={!selectedId || generating || creatingSlides}
-              variant="outline"
-            >
-              {generating
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-                : '✨ 生成文字素材'}
-            </Button>
-            <Button
-              onClick={handleCreateSlides}
-              disabled={!selectedId || generating || creatingSlides}
-            >
-              {creatingSlides
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />建立中...</>
-                : '🔗 建立 Google 簡報'}
-            </Button>
-          </div>
-
-          <Button
-            onClick={handleDownloadPptx}
-            disabled={!selectedId || downloadingPptx}
-            variant="outline"
-            className="w-full"
-          >
-            {downloadingPptx
-              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-              : <><Download className="w-4 h-4 mr-1.5" />📥 下載 PPTX（套用模板設計）</>}
-          </Button>
-
-          {slidesError && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">
-              {slidesError}
-              {slidesError.includes('重新連結') && (
-                <a href="/settings" className="ml-2 underline font-medium">前往設定頁面</a>
-              )}
-            </div>
-          )}
-
-          {brief && (
-            <div className="space-y-3">
-              <textarea
-                value={brief}
-                onChange={e => setBrief(e.target.value)}
-                rows={18}
-                className="w-full text-sm font-mono border rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">可直接編輯後再複製</p>
-                <button
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${copied ? 'bg-green-50 text-green-700 border-green-200' : 'hover:bg-slate-50'}`}
-                  onClick={() => {
-                    navigator.clipboard.writeText(brief)
-                    setCopied(true)
-                    setTimeout(() => setCopied(false), 2000)
-                  }}
-                >
-                  {copied
-                    ? <><CheckCheck className="w-3.5 h-3.5" />已複製！</>
-                    : <><Copy className="w-3.5 h-3.5" />複製全部</>}
-                </button>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
-                <p className="font-medium">貼入以下工具即可產出簡報：</p>
-                <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
-                <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
-                <p>• <strong>ChatGPT / Claude</strong> → 要求轉換為 PPT 大綱</p>
-              </div>
-            </div>
-          )}
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-// ── Generate Dialog ───────────────────────────────────────────────────────────
-
-function GenerateDialog({
-  onClose,
-  onGenerated,
-}: {
-  onClose: () => void
-  onGenerated: () => void
-}) {
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [form, setForm] = useState({
-    lead_id: '',
-    product_focus: '廣告投放',
-    budget_range: '50-100萬/月',
-    extra_context: '',
-  })
-  const [generating, setGenerating] = useState(false)
-  const [search, setSearch] = useState('')
-
-  useEffect(() => {
-    getLeads({ limit: 200 }).then(r => {
-      const data = r.data
-      setLeads(Array.isArray(data) ? data : data?.items || [])
-    })
-  }, [])
-
-  const filtered = leads.filter(l =>
-    l.company_name.toLowerCase().includes(search.toLowerCase())
-  )
-
-  const handleGenerate = async () => {
+  const handleCreateSlides = async () => {
     if (!form.lead_id) return
-    setGenerating(true)
+    setCreatingSlides(true)
+    setSlidesError('')
     try {
-      await generateProposal(form)
-      onGenerated()
-      onClose()
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`提案產生失敗：${msg || String(e)}`)
+      const res = await createGoogleSlides(form.lead_id)
+      window.open(res.data.url, '_blank')
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      setSlidesError(msg || '建立失敗，請稍後再試')
     } finally {
-      setGenerating(false)
+      setCreatingSlides(false)
+    }
+  }
+
+  const handleGenerateBrief = async () => {
+    if (!form.lead_id) return
+    setGeneratingBrief(true)
+    setBrief('')
+    try {
+      const res = await generatePptBrief(form.lead_id)
+      setBrief(res.data.brief)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(`生成失敗：${msg || String(err)}`)
+    } finally {
+      setGeneratingBrief(false)
     }
   }
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>AI 產生提案簡報</DialogTitle>
+          <DialogTitle>產生提案</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {/* 客戶選擇 */}
           <div>
             <Label>選擇客戶 *</Label>
             <Input
@@ -567,66 +414,138 @@ function GenerateDialog({
               <SelectContent className="max-h-52">
                 {filtered.slice(0, 50).map(l => (
                   <SelectItem key={l.id} value={l.id}>
-                    {l.company_name}
-                    {l.industry ? ` · ${l.industry}` : ''}
+                    {l.company_name}{l.industry ? ` · ${l.industry}` : ''}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
+          {/* 服務 + 預算 */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>主推服務</Label>
-              <Select
-                value={form.product_focus}
-                onValueChange={v => setForm(f => ({ ...f, product_focus: v }))}
-              >
+              <Select value={form.product_focus} onValueChange={v => setForm(f => ({ ...f, product_focus: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PRODUCT_OPTIONS.map(o => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
+                  {PRODUCT_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label>預算規模</Label>
-              <Select
-                value={form.budget_range}
-                onValueChange={v => setForm(f => ({ ...f, budget_range: v }))}
-              >
+              <Select value={form.budget_range} onValueChange={v => setForm(f => ({ ...f, budget_range: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {BUDGET_OPTIONS.map(o => (
-                    <SelectItem key={o} value={o}>{o}</SelectItem>
-                  ))}
+                  {BUDGET_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
 
+          {/* 補充背景 */}
           <div>
             <Label>補充背景（選填）</Label>
             <Textarea
               className="mt-1 text-sm"
-              rows={3}
+              rows={2}
               placeholder="例：主力商品為高單價3C，目前主要靠口碑，想開始投放廣告..."
               value={form.extra_context}
               onChange={e => setForm(f => ({ ...f, extra_context: e.target.value }))}
             />
           </div>
 
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" onClick={onClose} disabled={generating}>取消</Button>
-            <Button onClick={handleGenerate} disabled={!form.lead_id || generating}>
-              {generating ? (
-                <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />AI 生成中…</>
-              ) : (
-                <><Plus className="w-4 h-4 mr-1.5" />產生提案</>
-              )}
-            </Button>
+          {/* PPTX 設計模板 */}
+          <div className="p-3 bg-slate-50 border rounded-lg space-y-2">
+            <p className="text-xs font-medium text-slate-700">PPTX 設計模板（選填）</p>
+            <p className="text-xs text-muted-foreground">上傳你的 PPTX 設計檔，AI 會將提案內容套入你的版面後供下載</p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={uploadingTemplate}
+                onClick={() => document.getElementById('pptx-tpl-input')?.click()}
+                type="button"
+              >
+                {uploadingTemplate
+                  ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />上傳中...</>
+                  : <><Upload className="w-3 h-3 mr-1" />選擇 .pptx 檔案</>}
+              </Button>
+              {templateInfo && <span className="text-xs text-green-600">✓ {templateInfo}</span>}
+            </div>
+            <input id="pptx-tpl-input" type="file" accept=".pptx" className="hidden" onChange={handleUploadTemplate} />
           </div>
+
+          {/* 輸出方式 */}
+          <div className="space-y-2 border-t pt-3">
+            <Button
+              className="w-full"
+              onClick={handleDownloadPptx}
+              disabled={!form.lead_id || busy}
+            >
+              {downloadingPptx
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（套用模板設計）</>}
+            </Button>
+
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" onClick={handleGenerateBrief} disabled={!form.lead_id || busy}>
+                {generatingBrief
+                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+                  : '✨ 生成文字素材'}
+              </Button>
+              <Button variant="outline" onClick={handleCreateSlides} disabled={!form.lead_id || busy}>
+                {creatingSlides
+                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />建立中...</>
+                  : '🔗 建立 Google 簡報'}
+              </Button>
+            </div>
+
+            {slidesError && (
+              <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                {slidesError}
+                {slidesError.includes('重新連結') && (
+                  <a href="/settings" className="ml-2 underline font-medium">前往設定</a>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
+              <Button variant="outline" onClick={handleSaveProposal} disabled={!form.lead_id || busy}>
+                {generating
+                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+                  : <><Plus className="w-4 h-4 mr-1.5" />產生並儲存提案</>}
+              </Button>
+            </div>
+          </div>
+
+          {/* 文字素材輸出 */}
+          {brief && (
+            <div className="space-y-3 border-t pt-3">
+              <textarea
+                value={brief}
+                onChange={e => setBrief(e.target.value)}
+                rows={16}
+                className="w-full text-sm font-mono border rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
+              />
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">可直接編輯後複製</p>
+                <button
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${copied ? 'bg-green-50 text-green-700 border-green-200' : 'hover:bg-slate-50'}`}
+                  onClick={() => { navigator.clipboard.writeText(brief); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                >
+                  {copied ? <><CheckCheck className="w-3.5 h-3.5" />已複製！</> : <><Copy className="w-3.5 h-3.5" />複製全部</>}
+                </button>
+              </div>
+              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
+                <p className="font-medium">貼入以下工具即可產出簡報：</p>
+                <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
+                <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
+              </div>
+            </div>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -1063,7 +982,6 @@ export default function ProposalsPage() {
   const [proposals, setProposals] = useState<Proposal[]>([])
   const [loading, setLoading] = useState(true)
   const [showGenerate, setShowGenerate] = useState(false)
-  const [showBrief, setShowBrief] = useState(false)
   const [viewing, setViewing] = useState<Proposal | null>(null)
   const [search, setSearch] = useState('')
 
@@ -1100,9 +1018,6 @@ export default function ProposalsPage() {
           <p className="text-sm text-muted-foreground mt-0.5">AI 自動產生 5 階段數位行銷提案簡報</p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowBrief(true)}>
-            🖼️ 簡報資料
-          </Button>
           <Button onClick={() => setShowGenerate(true)}>
             <Plus className="w-4 h-4 mr-1.5" /> 產生提案
           </Button>
@@ -1175,10 +1090,6 @@ export default function ProposalsPage() {
           onClose={() => setShowGenerate(false)}
           onGenerated={load}
         />
-      )}
-
-      {showBrief && (
-        <BriefDialog onClose={() => setShowBrief(false)} />
       )}
 
       {viewing && (
