@@ -1315,8 +1315,21 @@ async def generate_pptx(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    # Load template and detect company name (metadata → live detection fallback)
     prs_check = PptxPresentation(template_path)
     n_slides = len(prs_check.slides)
+
+    meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
+    template_company = ""
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, encoding="utf-8") as mf:
+                template_company = json.load(mf).get("template_company", "")
+        except Exception:
+            pass
+    if not template_company:
+        template_company = _detect_template_company(prs_check)
+    print(f"[PPTX] template_company='{template_company}'  target='{lead.company_name}'")
 
     tech = lead.tech_signals or {}
     ad = lead.ad_signals or {}
@@ -1366,28 +1379,20 @@ async def generate_pptx(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
 
-    # Load template company metadata for global replace
-    meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
-    template_company = ""
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, encoding="utf-8") as mf:
-                template_company = json.load(mf).get("template_company", "")
-        except Exception:
-            pass
-
     try:
         prs = PptxPresentation(template_path)
         slides_data = slide_content.get("slides", [])
+
+        # Step 1: fill title + body shapes per slide with AI-generated content
         for i, slide in enumerate(prs.slides):
             if i >= len(slides_data):
                 break
             _fill_pptx_slide(slide, slides_data[i].get("title", ""), slides_data[i].get("bullets", []))
 
-        # Global replace: swap template company name with actual company name everywhere
+        # Step 2: replace every remaining occurrence of template company name with actual company
         if template_company and template_company != lead.company_name:
             replaced = _global_replace_text(prs, template_company, lead.company_name)
-            print(f"[PPTX] global replace '{template_company}' → '{lead.company_name}': {replaced} occurrences")
+            print(f"[PPTX] global replaced '{template_company}' → '{lead.company_name}': {replaced} occurrences")
 
         output = io.BytesIO()
         prs.save(output)
