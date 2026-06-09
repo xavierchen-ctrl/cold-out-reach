@@ -1170,29 +1170,59 @@ def _fill_pptx_slide(slide, title_text: str, bullets: list):
             pass
 
     if title_shape is None or body_shape is None:
-        non_ph = sorted(
-            [s for s in all_shapes if not _has_placeholder(s)],
-            key=lambda s: getattr(s, "top", 0),
-        )
-        print(f"[PPTX] non-placeholder shapes: {len(non_ph)}")
-        if non_ph and title_shape is None:
-            title_shape = non_ph[0]
-        if len(non_ph) > 1 and body_shape is None:
-            body_shape = non_ph[1]
+        non_ph = [s for s in all_shapes if not _has_placeholder(s)]
+        # First try: shapes whose text contains {{title}} / {{content}} markers
+        for s in non_ph:
+            try:
+                txt = s.text_frame.text
+                if "{{title}}" in txt and title_shape is None:
+                    title_shape = s
+                if "{{content}}" in txt and body_shape is None:
+                    body_shape = s
+            except Exception:
+                pass
+        # Second try: sort by area descending (largest = likely main content)
+        if title_shape is None or body_shape is None:
+            def _area(s):
+                try:
+                    return s.width * s.height
+                except Exception:
+                    return 0
+            by_area = sorted(non_ph, key=_area, reverse=True)
+            print(f"[PPTX] non-placeholder shapes: {len(by_area)}, top areas: {[_area(s) for s in by_area[:5]]}")
+            if by_area and title_shape is None:
+                # Second-largest is usually body, largest may be a bg box — skip single-line boxes
+                content_candidates = [s for s in by_area if _area(s) > 0]
+                if len(content_candidates) >= 2:
+                    body_shape = content_candidates[0]   # largest = body
+                    title_shape = content_candidates[1]  # second = title
+                elif content_candidates:
+                    title_shape = content_candidates[0]
 
+    if title_shape:
+        try:
+            print(f"[PPTX] title_shape current text: {title_shape.text_frame.text[:60]!r}")
+        except Exception:
+            pass
+    if body_shape:
+        try:
+            print(f"[PPTX] body_shape current text: {body_shape.text_frame.text[:60]!r}")
+        except Exception:
+            pass
     print(f"[PPTX] title_shape={title_shape is not None}  body_shape={body_shape is not None}")
 
     if title_shape:
         try:
             _write_lines_to_tf(title_shape.text_frame, [title_text])
-            print(f"[PPTX] title set: {title_text[:30]}")
+            print(f"[PPTX] title set: {title_text[:30]!r}")
         except Exception as e:
             print(f"[PPTX] title fill error: {e}")
 
     if body_shape:
         try:
             _write_lines_to_tf(body_shape.text_frame, bullets)
-            print(f"[PPTX] body set: {len(bullets)} bullets")
+            first_bullet = repr(bullets[0][:30]) if bullets else ""
+            print(f"[PPTX] body set: {len(bullets)} bullets, first={first_bullet}")
         except Exception as e:
             print(f"[PPTX] body fill error: {e}")
 
