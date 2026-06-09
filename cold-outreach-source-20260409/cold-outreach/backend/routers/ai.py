@@ -1152,9 +1152,52 @@ def _write_lines_to_tf(tf, lines: list):
     return True
 
 
+def _detect_template_company(prs) -> str:
+    """Find the most frequently repeated short text across slides — likely the template company name."""
+    from collections import Counter
+    counter: Counter = Counter()
+    for slide in prs.slides:
+        slide_texts: set = set()
+        for shape in _collect_text_shapes(slide.shapes):
+            try:
+                t = shape.text_frame.text.strip()
+                if 2 <= len(t) <= 20:
+                    slide_texts.add(t)
+            except Exception:
+                pass
+        for t in slide_texts:
+            counter[t] += 1
+    n = len(prs.slides)
+    candidates = [(t, c) for t, c in counter.items() if c >= max(2, n // 2)]
+    if not candidates:
+        candidates = counter.most_common(5)
+    if not candidates:
+        return ""
+    candidates.sort(key=lambda x: (-x[1], len(x[0])))
+    return candidates[0][0]
+
+
+def _global_replace_text(prs, old_text: str, new_text: str) -> int:
+    """Replace every occurrence of old_text in all text runs across all slides."""
+    if not old_text or old_text == new_text:
+        return 0
+    from pptx.oxml.ns import qn
+    count = 0
+    for slide in prs.slides:
+        for shape in _collect_text_shapes(slide.shapes):
+            try:
+                txBody = shape.text_frame._txBody
+                for t_el in txBody.iter(qn("a:t")):
+                    if t_el.text and old_text in t_el.text:
+                        t_el.text = t_el.text.replace(old_text, new_text)
+                        count += 1
+            except Exception:
+                pass
+    return count
+
+
 def _fill_pptx_slide(slide, title_text: str, bullets: list):
     all_shapes = _collect_text_shapes(slide.shapes)
-    print(f"[PPTX] slide text shapes: {len(all_shapes)}")
 
     title_shape, body_shape = None, None
     for shape in all_shapes:
@@ -1171,7 +1214,7 @@ def _fill_pptx_slide(slide, title_text: str, bullets: list):
 
     if title_shape is None or body_shape is None:
         non_ph = [s for s in all_shapes if not _has_placeholder(s)]
-        # First try: shapes whose text contains {{title}} / {{content}} markers
+        # 1st try: explicit markers in template
         for s in non_ph:
             try:
                 txt = s.text_frame.text
@@ -1181,48 +1224,36 @@ def _fill_pptx_slide(slide, title_text: str, bullets: list):
                     body_shape = s
             except Exception:
                 pass
-        # Second try: sort by area descending (largest = likely main content)
+        # 2nd try: largest shapes that have existing text content (skip empty bg boxes)
         if title_shape is None or body_shape is None:
             def _area(s):
                 try:
                     return s.width * s.height
                 except Exception:
                     return 0
-            by_area = sorted(non_ph, key=_area, reverse=True)
-            print(f"[PPTX] non-placeholder shapes: {len(by_area)}, top areas: {[_area(s) for s in by_area[:5]]}")
-            if by_area and title_shape is None:
-                # Second-largest is usually body, largest may be a bg box — skip single-line boxes
-                content_candidates = [s for s in by_area if _area(s) > 0]
-                if len(content_candidates) >= 2:
-                    body_shape = content_candidates[0]   # largest = body
-                    title_shape = content_candidates[1]  # second = title
-                elif content_candidates:
-                    title_shape = content_candidates[0]
+            # Prefer non-empty shapes; fall back to any shape if all are empty
+            non_empty = [s for s in non_ph if s.text_frame.text.strip()]
+            pool = non_empty if non_empty else non_ph
+            by_area = sorted(pool, key=_area, reverse=True)
+            print(f"[PPTX] pool={len(pool)} (non-empty={len(non_empty)}), top areas: {[_area(s) for s in by_area[:5]]}")
+            content_candidates = [s for s in by_area if _area(s) > 0]
+            if len(content_candidates) >= 2:
+                body_shape = content_candidates[0]
+                title_shape = content_candidates[1]
+            elif content_candidates:
+                title_shape = content_candidates[0]
 
     if title_shape:
         try:
-            print(f"[PPTX] title_shape current text: {title_shape.text_frame.text[:60]!r}")
-        except Exception:
-            pass
-    if body_shape:
-        try:
-            print(f"[PPTX] body_shape current text: {body_shape.text_frame.text[:60]!r}")
-        except Exception:
-            pass
-    print(f"[PPTX] title_shape={title_shape is not None}  body_shape={body_shape is not None}")
-
-    if title_shape:
-        try:
+            print(f"[PPTX] title_shape text: {title_shape.text_frame.text[:40]!r}")
             _write_lines_to_tf(title_shape.text_frame, [title_text])
-            print(f"[PPTX] title set: {title_text[:30]!r}")
         except Exception as e:
             print(f"[PPTX] title fill error: {e}")
 
     if body_shape:
         try:
+            print(f"[PPTX] body_shape text: {body_shape.text_frame.text[:40]!r}")
             _write_lines_to_tf(body_shape.text_frame, bullets)
-            first_bullet = repr(bullets[0][:30]) if bullets else ""
-            print(f"[PPTX] body set: {len(bullets)} bullets, first={first_bullet}")
         except Exception as e:
             print(f"[PPTX] body fill error: {e}")
 
@@ -1251,7 +1282,19 @@ async def upload_pptx_template(
         f.write(content)
 
     prs = PptxPresentation(io.BytesIO(content))
-    return {"ok": True, "slide_count": len(prs.slides), "message": f"模板上傳成功（共 {len(prs.slides)} 頁）"}
+    template_company = _detect_template_company(prs)
+    print(f"[PPTX] detected template_company: {template_company!r}")
+
+    meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
+    with open(meta_path, "w", encoding="utf-8") as mf:
+        json.dump({"template_company": template_company}, mf, ensure_ascii=False)
+
+    return {
+        "ok": True,
+        "slide_count": len(prs.slides),
+        "message": f"模板上傳成功（共 {len(prs.slides)} 頁）",
+        "template_company": template_company,
+    }
 
 
 @router.post("/generate-pptx")
@@ -1323,6 +1366,16 @@ async def generate_pptx(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
 
+    # Load template company metadata for global replace
+    meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
+    template_company = ""
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, encoding="utf-8") as mf:
+                template_company = json.load(mf).get("template_company", "")
+        except Exception:
+            pass
+
     try:
         prs = PptxPresentation(template_path)
         slides_data = slide_content.get("slides", [])
@@ -1330,6 +1383,11 @@ async def generate_pptx(
             if i >= len(slides_data):
                 break
             _fill_pptx_slide(slide, slides_data[i].get("title", ""), slides_data[i].get("bullets", []))
+
+        # Global replace: swap template company name with actual company name everywhere
+        if template_company and template_company != lead.company_name:
+            replaced = _global_replace_text(prs, template_company, lead.company_name)
+            print(f"[PPTX] global replace '{template_company}' → '{lead.company_name}': {replaced} occurrences")
 
         output = io.BytesIO()
         prs.save(output)
