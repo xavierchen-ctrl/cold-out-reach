@@ -345,5 +345,5 @@ export const uploadPptxTemplate = (file: File) => {
     headers: { 'Content-Type': 'multipart/form-data' },
   })
 }
-export const generatePptxDownload = (lead_id: string, extra_context?: string) =>
-  api.post('/ai/generate-pptx', { lead_id, extra_context: extra_context || '' }, { responseType: 'blob' })
+export const generatePptxDownload = (lead_id: string, extra_context?: string, use_template?: boolean) =>
+  api.post('/ai/generate-pptx', { lead_id, extra_context: extra_context || '', use_template: use_template ?? false }, { responseType: 'blob' })

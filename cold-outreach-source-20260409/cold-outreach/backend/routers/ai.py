@@ -1300,6 +1300,85 @@ async def upload_pptx_template(
 class GeneratePptxRequest(BaseModel):
     lead_id: str
     extra_context: str = ""
+    use_template: bool = False  # True only when user explicitly uploaded a template this session
+
+
+def _build_pptx_from_scratch(slides_data: list, company_name: str) -> io.BytesIO:
+    """Generate a clean, professional PPTX without any template."""
+    from pptx import Presentation as _Prs
+    from pptx.util import Inches, Pt
+    from pptx.dml.color import RGBColor
+
+    DARK_BLUE = RGBColor(0x1A, 0x37, 0x6C)
+    ACCENT    = RGBColor(0x00, 0x8C, 0xD7)
+    WHITE     = RGBColor(0xFF, 0xFF, 0xFF)
+    TEXT      = RGBColor(0x1A, 0x1A, 0x2E)
+
+    prs = _Prs()
+    prs.slide_width  = Inches(13.33)
+    prs.slide_height = Inches(7.5)
+    blank = prs.slide_layouts[6]
+
+    for idx, sd in enumerate(slides_data):
+        slide = prs.slides.add_slide(blank)
+
+        # White background
+        bg = slide.background.fill
+        bg.solid()
+        bg.fore_color.rgb = WHITE
+
+        # Dark blue header bar
+        hdr = slide.shapes.add_shape(1, Inches(0), Inches(0), prs.slide_width, Inches(1.8))
+        hdr.fill.solid()
+        hdr.fill.fore_color.rgb = DARK_BLUE
+        hdr.line.fill.background()
+
+        # Accent stripe on left edge
+        bar = slide.shapes.add_shape(1, Inches(0), Inches(1.8), Inches(0.12), Inches(5.7))
+        bar.fill.solid()
+        bar.fill.fore_color.rgb = ACCENT
+        bar.line.fill.background()
+
+        # Slide number badge (top-right)
+        badge = slide.shapes.add_textbox(Inches(12.5), Inches(0.3), Inches(0.7), Inches(0.5))
+        bp = badge.text_frame.paragraphs[0]
+        bp.add_run().text = str(idx + 1)
+        bp.runs[0].font.size  = Pt(13)
+        bp.runs[0].font.color.rgb = RGBColor(0x88, 0xAA, 0xDD)
+
+        # Title in header
+        tbox = slide.shapes.add_textbox(Inches(0.45), Inches(0.32), Inches(12.0), Inches(1.25))
+        tbox.text_frame.word_wrap = True
+        tp = tbox.text_frame.paragraphs[0]
+        run = tp.add_run()
+        run.text = sd.get("title", "")
+        run.font.size  = Pt(30)
+        run.font.bold  = True
+        run.font.color.rgb = WHITE
+
+        # Company name in header (small, right-aligned below title)
+        cbox = slide.shapes.add_textbox(Inches(0.45), Inches(1.42), Inches(11), Inches(0.35))
+        cp = cbox.text_frame.paragraphs[0]
+        crun = cp.add_run()
+        crun.text = company_name
+        crun.font.size  = Pt(11)
+        crun.font.color.rgb = RGBColor(0x99, 0xBB, 0xEE)
+
+        # Bullet points
+        bbox = slide.shapes.add_textbox(Inches(0.45), Inches(2.1), Inches(12.7), Inches(5.1))
+        bbox.text_frame.word_wrap = True
+        for j, bullet in enumerate(sd.get("bullets", [])):
+            p = bbox.text_frame.paragraphs[0] if j == 0 else bbox.text_frame.add_paragraph()
+            r = p.add_run()
+            r.text = f"▸  {bullet}"
+            r.font.size  = Pt(19)
+            r.font.color.rgb = TEXT
+            p.space_before = Pt(10)
+
+    out = io.BytesIO()
+    prs.save(out)
+    out.seek(0)
+    return out
 
 
 @router.post("/generate-pptx")
@@ -1313,28 +1392,28 @@ async def generate_pptx(
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     template_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}.pptx")
-    if not os.path.exists(template_path):
-        raise HTTPException(status_code=404, detail="尚未上傳 PPTX 模板，請先上傳模板檔案")
+    use_template = body.use_template and os.path.exists(template_path)
 
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # Load template and detect company name (metadata → live detection fallback)
-    prs_check = PptxPresentation(template_path)
-    n_slides = len(prs_check.slides)
-
-    meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
+    n_slides = 6  # default for scratch builds
     template_company = ""
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, encoding="utf-8") as mf:
-                template_company = json.load(mf).get("template_company", "")
-        except Exception:
-            pass
-    if not template_company:
-        template_company = _detect_template_company(prs_check)
-    print(f"[PPTX] template_company='{template_company}'  target='{lead.company_name}'")
+
+    if use_template:
+        prs_check = PptxPresentation(template_path)
+        n_slides = len(prs_check.slides)
+        meta_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}_meta.json")
+        if os.path.exists(meta_path):
+            try:
+                with open(meta_path, encoding="utf-8") as mf:
+                    template_company = json.load(mf).get("template_company", "")
+            except Exception:
+                pass
+        if not template_company:
+            template_company = _detect_template_company(prs_check)
+        print(f"[PPTX] template_company='{template_company}'  target='{lead.company_name}'")
 
     # Fetch website content for accurate company description
     website_text = ""
@@ -1413,28 +1492,32 @@ async def generate_pptx(
         raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
 
     try:
-        prs = PptxPresentation(template_path)
         slides_data = slide_content.get("slides", [])
-
-        # Step 1: fill title + body shapes per slide with AI-generated content
-        for i, slide in enumerate(prs.slides):
-            if i >= len(slides_data):
-                break
-            _fill_pptx_slide(slide, slides_data[i].get("title", ""), slides_data[i].get("bullets", []))
-
-        # Step 2: replace every remaining occurrence of template company name with actual company
-        if template_company and template_company != lead.company_name:
-            replaced = _global_replace_text(prs, template_company, lead.company_name)
-            print(f"[PPTX] global replaced '{template_company}' → '{lead.company_name}': {replaced} occurrences")
-
-        output = io.BytesIO()
-        prs.save(output)
-        output.seek(0)
-
         from urllib.parse import quote
         safe_name = re.sub(r"[^\w一-鿿]", "_", lead.company_name)
         filename = f"{safe_name}_提案簡報.pptx"
         encoded_filename = quote(filename)
+
+        if use_template:
+            prs = PptxPresentation(template_path)
+
+            # Step 1: fill title + body shapes per slide with AI-generated content
+            for i, slide in enumerate(prs.slides):
+                if i >= len(slides_data):
+                    break
+                _fill_pptx_slide(slide, slides_data[i].get("title", ""), slides_data[i].get("bullets", []))
+
+            # Step 2: replace every remaining occurrence of template company name with actual company
+            if template_company and template_company != lead.company_name:
+                replaced = _global_replace_text(prs, template_company, lead.company_name)
+                print(f"[PPTX] global replaced '{template_company}' → '{lead.company_name}': {replaced} occurrences")
+
+            output = io.BytesIO()
+            prs.save(output)
+            output.seek(0)
+        else:
+            print(f"[PPTX] no template — building from scratch for '{lead.company_name}'")
+            output = _build_pptx_from_scratch(slides_data, lead.company_name)
 
         return StreamingResponse(
             output,
