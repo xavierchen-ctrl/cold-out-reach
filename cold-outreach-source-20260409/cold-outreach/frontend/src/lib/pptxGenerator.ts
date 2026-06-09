@@ -16,77 +16,141 @@ const C = {
   navy:     '1A376C',
   navyMid:  '1E4080',
   accent:   '0099E6',
-  accentDk: '0070B0',
+  accentLt: '4DB8FF',
   teal:     '00C2A8',
+  orange:   'F6803A',
   white:    'FFFFFF',
   offWhite: 'F5F7FA',
   cardBg:   'EEF4FA',
   text:     '1A1A2E',
   subtext:  '4A5568',
   muted:    'A0AEC0',
-  gold:     'F6AD55',
+  deco:     'C5D8F0',  // light blue for decorative circles
 }
 
-// Palette cycling for card accents
-const CARD_COLORS = ['0099E6', '00C2A8', 'F6AD55', 'E05C8B', '7C5CBF', '38B2AC']
-
+const CARD_COLORS = ['0099E6', '00C2A8', 'F6803A', 'E05C8B', '7C5CBF', '38B2AC']
 const FONT = 'Arial'
+
+type PptxSlide = ReturnType<InstanceType<typeof pptxgen>['addSlide']>
+
+// ── Decorative background circles (Wavenet-style) ──────────────────────────────
+function addDecoCircles(slide: PptxSlide) {
+  // Top-right large blob
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 10.8, y: -1.2, w: 3.8, h: 3.8,
+    fill: { color: C.deco, transparency: 82 },
+    line: { type: 'none' },
+  })
+  // Top-right smaller
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 11.6, y: 0.4, w: 2.2, h: 2.2,
+    fill: { color: C.accent, transparency: 90 },
+    line: { type: 'none' },
+  })
+  // Bottom-left large blob
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: -1.0, y: 5.4, w: 3.6, h: 3.6,
+    fill: { color: C.deco, transparency: 82 },
+    line: { type: 'none' },
+  })
+  // Bottom-left smaller
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 0.2, y: 6.0, w: 2.0, h: 2.0,
+    fill: { color: C.accent, transparency: 90 },
+    line: { type: 'none' },
+  })
+}
+
+// ── Footer bar ─────────────────────────────────────────────────────────────────
+function addFooter(slide: PptxSlide, companyName: string, slideTitle: string) {
+  const today = new Date().toISOString().slice(0, 10)
+
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 7.05, w: 13.33, h: 0.45,
+    fill: { color: C.navy },
+    line: { type: 'none' },
+  })
+  // Orange left accent strip
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 7.05, w: 0.18, h: 0.45,
+    fill: { color: C.orange },
+    line: { type: 'none' },
+  })
+
+  const footerText = `${companyName}  |  ${today}  |  ${slideTitle}`
+  slide.addText(footerText, {
+    x: 0.3, y: 7.06, w: 12.7, h: 0.42,
+    fontSize: 9,
+    fontFace: FONT,
+    color: '7A9BC0',
+    align: 'left',
+    valign: 'middle',
+  })
+  slide.addText('潮網科技  Wavenet Technology', {
+    x: 0.3, y: 7.06, w: 12.7, h: 0.42,
+    fontSize: 9,
+    fontFace: FONT,
+    color: '5A7A9A',
+    align: 'right',
+    valign: 'middle',
+    italic: true,
+  })
+}
 
 // ── Cover slide ────────────────────────────────────────────────────────────────
 function addCoverSlide(pptx: pptxgen, companyName: string, industry: string) {
   const slide = pptx.addSlide()
 
-  // Left panel — full dark navy
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 7.0, h: 7.5,
+  // Full dark navy background
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 0, w: 13.33, h: 7.5,
     fill: { color: C.navy },
     line: { type: 'none' },
   })
 
-  // Right panel — off-white
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 7.0, y: 0, w: 6.33, h: 7.5,
-    fill: { color: C.offWhite },
+  // Subtle grid/tech texture — horizontal lines
+  for (let i = 0; i < 12; i++) {
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: 0, y: i * 0.62, w: 13.33, h: 0.01,
+      fill: { color: '2A4A80', transparency: 60 },
+      line: { type: 'none' },
+    })
+  }
+
+  // Large decorative circle — top right
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 9.5, y: -2.5, w: 6.0, h: 6.0,
+    fill: { color: '1E4890', transparency: 65 },
+    line: { type: 'none' },
+  })
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 10.5, y: -1.2, w: 4.0, h: 4.0,
+    fill: { color: '0060A8', transparency: 75 },
     line: { type: 'none' },
   })
 
-  // Decorative large initial letter (watermark)
-  const initial = companyName.slice(0, 1)
-  slide.addText(initial, {
-    x: 3.5, y: 0.5, w: 4, h: 4,
-    fontSize: 260,
-    bold: true,
-    fontFace: FONT,
-    color: '243A6E',
-    align: 'center',
-    valign: 'top',
-    transparency: 70,
-  })
-
-  // Accent stripe on left edge
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 0.18, h: 7.5,
-    fill: { color: C.accent },
+  // Orange accent bar left edge
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 0, w: 0.22, h: 7.5,
+    fill: { color: C.orange },
     line: { type: 'none' },
   })
 
-  // Teal diagonal decorative block top-right of left panel
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 5.6, y: 0, w: 1.4, h: 0.9,
+  // Teal accent stripe top
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0.22, y: 0, w: 13.11, h: 0.1,
     fill: { color: C.teal },
     line: { type: 'none' },
   })
 
-  // LEFT PANEL content ─────────────────────────────────
-
-  // "提案簡報" tag
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0.45, y: 1.35, w: 1.9, h: 0.42,
-    fill: { color: C.accent },
+  // "提案簡報" pill tag
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0.55, y: 0.85, w: 2.0, h: 0.44,
+    fill: { color: C.orange },
     line: { type: 'none' },
   })
   slide.addText('提案簡報', {
-    x: 0.45, y: 1.35, w: 1.9, h: 0.42,
+    x: 0.55, y: 0.85, w: 2.0, h: 0.44,
     fontSize: 13,
     bold: true,
     fontFace: FONT,
@@ -95,44 +159,55 @@ function addCoverSlide(pptx: pptxgen, companyName: string, industry: string) {
     valign: 'middle',
   })
 
-  // Company name (large)
+  // Industry tag
+  if (industry) {
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: 2.72, y: 0.85, w: 2.0, h: 0.44,
+      fill: { color: C.accent, transparency: 20 },
+      line: { type: 'none' },
+    })
+    slide.addText(industry, {
+      x: 2.72, y: 0.85, w: 2.0, h: 0.44,
+      fontSize: 12,
+      fontFace: FONT,
+      color: C.white,
+      align: 'center',
+      valign: 'middle',
+    })
+  }
+
+  // Large company name
   slide.addText(companyName, {
-    x: 0.38, y: 2.0, w: 6.35, h: 2.2,
-    fontSize: companyName.length > 8 ? 38 : 46,
+    x: 0.5, y: 1.55, w: 8.0, h: 2.6,
+    fontSize: companyName.length > 10 ? 52 : companyName.length > 6 ? 62 : 72,
     bold: true,
     fontFace: FONT,
     color: C.white,
     valign: 'middle',
-    breakLine: false,
   })
 
-  // Separator line
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0.38, y: 4.28, w: 2.0, h: 0.06,
-    fill: { color: C.accent },
+  // Accent line under company name
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0.5, y: 4.28, w: 3.0, h: 0.07,
+    fill: { color: C.orange },
+    line: { type: 'none' },
+  })
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 3.65, y: 4.28, w: 1.0, h: 0.07,
+    fill: { color: C.teal },
     line: { type: 'none' },
   })
 
   // Subtitle
   slide.addText('數位行銷整合提案', {
-    x: 0.38, y: 4.46, w: 6.3, h: 0.55,
-    fontSize: 18,
+    x: 0.5, y: 4.48, w: 7.0, h: 0.6,
+    fontSize: 22,
     fontFace: FONT,
-    color: 'A8C4E0',
+    color: '8AAECC',
+    valign: 'middle',
   })
 
-  // Wavenet brand
-  slide.addText('潮網科技  Wavenet Technology', {
-    x: 0.38, y: 6.8, w: 6.3, h: 0.45,
-    fontSize: 11,
-    fontFace: FONT,
-    color: '6888AA',
-    italic: true,
-  })
-
-  // RIGHT PANEL content ────────────────────────────────
-
-  // Info cards on right
+  // ── RIGHT: Info cards ────────────────────────────────────────────────────────
   const infoItems = [
     { label: '客戶', value: companyName },
     { label: '產業', value: industry || '數位行銷' },
@@ -141,50 +216,58 @@ function addCoverSlide(pptx: pptxgen, companyName: string, industry: string) {
   ]
 
   infoItems.forEach((item, i) => {
-    const y = 1.5 + i * 1.1
-    // Card background
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 7.25, y, w: 5.7, h: 0.85,
-      fill: { color: C.white },
-      line: { color: 'DDDDEE', width: 1 },
+    const y = 1.1 + i * 1.18
+    const accentC = CARD_COLORS[i % CARD_COLORS.length]
+
+    // Card (semi-transparent dark bg)
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: 9.1, y, w: 3.9, h: 0.96,
+      fill: { color: '0A2040', transparency: 30 },
+      line: { color: accentC, width: 1, transparency: 40 },
     })
-    // Color left accent on card
-    slide.addShape(pptx.ShapeType.rect, {
-      x: 7.25, y, w: 0.12, h: 0.85,
-      fill: { color: CARD_COLORS[i % CARD_COLORS.length] },
+    // Top accent border
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: 9.1, y, w: 3.9, h: 0.08,
+      fill: { color: accentC },
+      line: { type: 'none' },
+    })
+    // Icon circle
+    slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+      x: 9.22, y: y + 0.2, w: 0.52, h: 0.52,
+      fill: { color: accentC, transparency: 20 },
       line: { type: 'none' },
     })
     // Label
     slide.addText(item.label, {
-      x: 7.5, y: y + 0.04, w: 1.2, h: 0.35,
-      fontSize: 10,
+      x: 9.88, y: y + 0.1, w: 3.0, h: 0.3,
+      fontSize: 9,
       fontFace: FONT,
-      color: C.muted,
-      bold: false,
+      color: '7AAAC8',
     })
     // Value
     slide.addText(item.value, {
-      x: 7.5, y: y + 0.38, w: 5.2, h: 0.38,
+      x: 9.88, y: y + 0.42, w: 3.0, h: 0.42,
       fontSize: 14,
-      fontFace: FONT,
-      color: C.text,
       bold: true,
+      fontFace: FONT,
+      color: C.white,
     })
   })
 
-  // Bottom right decoration
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 7.0, y: 6.9, w: 6.33, h: 0.6,
-    fill: { color: C.navy },
+  // Bottom Wavenet brand bar
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 6.9, w: 13.33, h: 0.6,
+    fill: { color: '0A1828', transparency: 20 },
     line: { type: 'none' },
   })
-  slide.addText('Confidential', {
-    x: 7.1, y: 6.95, w: 6.1, h: 0.45,
+  slide.addText('潮網科技  Wavenet Technology  ·  數位行銷整合服務', {
+    x: 0.4, y: 6.92, w: 12.5, h: 0.48,
     fontSize: 10,
     fontFace: FONT,
-    color: '6888AA',
-    align: 'right',
+    color: '5A7A9A',
     italic: true,
+    align: 'center',
+    valign: 'middle',
   })
 }
 
@@ -199,36 +282,41 @@ function addContentSlide(
 ) {
   const slide = pptx.addSlide()
 
-  // Off-white full background
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: '100%', h: '100%',
+  // Off-white background
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 0, w: 13.33, h: 7.5,
     fill: { color: C.offWhite },
     line: { type: 'none' },
   })
 
-  // LEFT sidebar
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 3.4, h: 7.5,
+  // Decorative background circles (Wavenet-style)
+  addDecoCircles(slide as PptxSlide)
+
+  // ── LEFT title zone (40% width) ─────────────────────────────────────────────
+
+  // Thin orange left edge stripe
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0, y: 0, w: 0.18, h: 7.05,
+    fill: { color: C.orange },
+    line: { type: 'none' },
+  })
+
+  // Navy header band top
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0.18, y: 0, w: 13.15, h: 0.08,
     fill: { color: C.navy },
     line: { type: 'none' },
   })
 
-  // Teal accent bar at top of sidebar
-  slide.addShape(pptx.ShapeType.rect, {
-    x: 0, y: 0, w: 3.4, h: 0.12,
-    fill: { color: C.accent },
+  // Slide number pill
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 0.35, y: 0.22, w: 0.78, h: 0.38,
+    fill: { color: C.navy },
     line: { type: 'none' },
   })
-
-  // Slide number circle in sidebar (top)
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 0.25, y: 0.28, w: 0.55, h: 0.55,
-    fill: { color: C.accent },
-    line: { type: 'none' },
-  })
-  slide.addText(`${idx}`, {
-    x: 0.25, y: 0.28, w: 0.55, h: 0.55,
-    fontSize: 14,
+  slide.addText(`${String(idx).padStart(2, '0')}`, {
+    x: 0.35, y: 0.22, w: 0.78, h: 0.38,
+    fontSize: 12,
     bold: true,
     fontFace: FONT,
     color: C.white,
@@ -236,88 +324,86 @@ function addContentSlide(
     valign: 'middle',
   })
 
-  // Total indicator
+  // Total count beside pill
   slide.addText(`/ ${total}`, {
-    x: 0.85, y: 0.32, w: 0.6, h: 0.4,
+    x: 1.2, y: 0.24, w: 0.6, h: 0.34,
     fontSize: 10,
     fontFace: FONT,
-    color: '6888AA',
+    color: C.muted,
     valign: 'middle',
   })
 
-  // Title text in sidebar
+  // Giant title text — left 45% of slide, vertically centered
+  const titleFontSize = title.length > 16 ? 32 : title.length > 10 ? 38 : 44
   slide.addText(title, {
-    x: 0.2, y: 1.1, w: 2.95, h: 4.5,
-    fontSize: 20,
+    x: 0.35, y: 0.85, w: 5.5, h: 5.9,
+    fontSize: titleFontSize,
     bold: true,
     fontFace: FONT,
-    color: C.white,
-    valign: 'top',
+    color: C.navy,
+    valign: 'middle',
     breakLine: true,
   })
 
-  // Decorative teal dot bottom of sidebar
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 0.28, y: 6.7, w: 0.4, h: 0.4,
+  // Orange accent dots below title area
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 0.35, y: 6.55, w: 0.22, h: 0.22,
+    fill: { color: C.orange },
+    line: { type: 'none' },
+  })
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 0.66, y: 6.59, w: 0.15, h: 0.15,
     fill: { color: C.teal },
     line: { type: 'none' },
   })
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 0.82, y: 6.76, w: 0.28, h: 0.28,
-    fill: { color: C.accent },
-    line: { type: 'none' },
-  })
-  slide.addShape(pptx.ShapeType.ellipse, {
-    x: 1.24, y: 6.8, w: 0.2, h: 0.2,
-    fill: { color: '6888AA' },
+  slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+    x: 0.92, y: 6.62, w: 0.11, h: 0.11,
+    fill: { color: C.muted },
     line: { type: 'none' },
   })
 
-  // Company branding at bottom of sidebar
-  slide.addText(companyName, {
-    x: 0.18, y: 6.88, w: 3.0, h: 0.4,
-    fontSize: 9,
-    fontFace: FONT,
-    color: '4A6888',
-    italic: true,
+  // Vertical divider between title and content
+  slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+    x: 6.1, y: 0.2, w: 0.04, h: 6.6,
+    fill: { color: 'D0DAEA' },
+    line: { type: 'none' },
   })
 
-  // ── RIGHT content area: bullet cards ──────────────────
-  const cardX = 3.65
-  const cardW = 9.35
+  // ── RIGHT content zone (cards) ──────────────────────────────────────────────
+  const cardX = 6.35
+  const cardW = 6.7
   const totalCards = Math.min(bullets.length, 5)
-  const cardH = totalCards > 0 ? Math.min((6.8) / totalCards, 1.22) : 1.2
-  const startY = (7.5 - totalCards * cardH) / 2
+  const cardH = totalCards > 0 ? Math.min(6.4 / totalCards, 1.18) : 1.15
+  const startY = (7.05 - totalCards * cardH) / 2
 
   bullets.slice(0, 5).forEach((bullet, j) => {
     const y = startY + j * cardH
     const accentColor = CARD_COLORS[j % CARD_COLORS.length]
 
     // Card background
-    slide.addShape(pptx.ShapeType.rect, {
-      x: cardX, y: y + 0.08, w: cardW, h: cardH - 0.16,
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: cardX, y: y + 0.06, w: cardW, h: cardH - 0.12,
       fill: { color: C.white },
       line: { color: 'E2E8F0', width: 1 },
     })
 
-    // Colored left accent on card
-    slide.addShape(pptx.ShapeType.rect, {
-      x: cardX, y: y + 0.08, w: 0.14, h: cardH - 0.16,
+    // Colored top accent border on card
+    slide.addShape('rect' as pptxgen.SHAPE_NAME, {
+      x: cardX, y: y + 0.06, w: cardW, h: 0.07,
       fill: { color: accentColor },
       line: { type: 'none' },
     })
 
-    // Number circle
-    slide.addShape(pptx.ShapeType.ellipse, {
-      x: cardX + 0.28, y: y + cardH / 2 - 0.28,
-      w: 0.55, h: 0.55,
-      fill: { color: accentColor },
+    // Icon circle (navy bg, white "number")
+    const circleY = y + (cardH - 0.16) / 2 - 0.22
+    slide.addShape('ellipse' as pptxgen.SHAPE_NAME, {
+      x: cardX + 0.22, y: circleY, w: 0.5, h: 0.5,
+      fill: { color: C.navy },
       line: { type: 'none' },
     })
     slide.addText(`${j + 1}`, {
-      x: cardX + 0.28, y: y + cardH / 2 - 0.28,
-      w: 0.55, h: 0.55,
-      fontSize: 13,
+      x: cardX + 0.22, y: circleY, w: 0.5, h: 0.5,
+      fontSize: 12,
       bold: true,
       fontFace: FONT,
       color: C.white,
@@ -327,14 +413,16 @@ function addContentSlide(
 
     // Bullet text
     slide.addText(bullet, {
-      x: cardX + 1.0, y: y + 0.08, w: cardW - 1.2, h: cardH - 0.16,
-      fontSize: 15,
+      x: cardX + 0.9, y: y + 0.06, w: cardW - 1.05, h: cardH - 0.12,
+      fontSize: 14,
       fontFace: FONT,
       color: C.text,
       valign: 'middle',
       breakLine: false,
     })
   })
+
+  addFooter(slide as PptxSlide, companyName, title)
 }
 
 // ── Public entry point ─────────────────────────────────────────────────────────
