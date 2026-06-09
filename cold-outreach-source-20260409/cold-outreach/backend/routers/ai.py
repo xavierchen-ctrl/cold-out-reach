@@ -986,7 +986,7 @@ async def create_google_slides(
             body_id = f"body_{i}"
 
             requests.append({
-                "insertSlide": {
+                "createSlide": {
                     "objectId": slide_id,
                     "insertionIndex": i,
                     "slideLayoutReference": {"predefinedLayout": "BLANK"},
