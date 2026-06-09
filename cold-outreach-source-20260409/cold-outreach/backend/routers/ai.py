@@ -1297,9 +1297,14 @@ async def upload_pptx_template(
     }
 
 
+class GeneratePptxRequest(BaseModel):
+    lead_id: str
+    extra_context: str = ""
+
+
 @router.post("/generate-pptx")
 async def generate_pptx(
-    body: PptBriefRequest,
+    body: GeneratePptxRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1331,11 +1336,35 @@ async def generate_pptx(
         template_company = _detect_template_company(prs_check)
     print(f"[PPTX] template_company='{template_company}'  target='{lead.company_name}'")
 
+    # Fetch website content for accurate company description
+    website_text = ""
+    if lead.website:
+        try:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers=_HTTP_HEADERS) as client:
+                res = await client.get(lead.website if lead.website.startswith("http") else f"https://{lead.website}")
+                website_text = _strip_tags(res.text)[:3000]
+        except Exception:
+            pass
+
     tech = lead.tech_signals or {}
     ad = lead.ad_signals or {}
     score = lead.enriched_score or 0
     tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v) or "無"
     ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v) or "無"
+
+    website_section = ""
+    if website_text:
+        website_section = f"""
+【官網內容摘要（請以此為準，不得自行捏造公司業務）】
+{website_text}
+"""
+
+    extra_section = ""
+    if body.extra_context and body.extra_context.strip():
+        extra_section = f"""
+【補充說明（優先參考）】
+{body.extra_context.strip()}
+"""
 
     all_topics = [
         f"關於 {lead.company_name}（公司概況、產業定位）",
@@ -1347,25 +1376,29 @@ async def generate_pptx(
     ]
     topics_str = "\n".join(f"{i+1}. {t}" for i, t in enumerate(all_topics[:n_slides]))
 
-    prompt = f"""你是潮網科技的業務顧問。請根據以下廠商資訊，生成一份 {n_slides} 頁簡報的內容。
+    prompt = f"""你是潮網科技的業務顧問，正在為客戶製作提案簡報。
 
-廠商資訊：
+【重要原則】
+- 所有內容必須根據下方提供的資料撰寫，不得憑空捏造
+- 若官網摘要有提供，以官網內容為主要依據
+- 不要假設公司的產品或服務，必須從資料中找依據
+{extra_section}{website_section}
+【廠商基本資料】
 - 公司：{lead.company_name}
-- 產業：{lead.industry or "未知"}
+- 產業：{lead.industry or "（請從官網內容判斷）"}
 - 城市：{lead.city or "台灣"}
-- 官網：{lead.website or "未知"}
 - 規模：{lead.company_size or "未知"}
 - 含金量：{score}/100
-- 追蹤工具：{tech_str}
+- 數位追蹤工具：{tech_str}
 - 廣告投放：{ad_str}
 
-頁面主題（依序）：
+【簡報頁面主題（依序生成 {n_slides} 頁）】
 {topics_str}
 
-只輸出 JSON：
+只輸出 JSON，不要其他說明：
 {{"slides": [{{"title": "標題", "bullets": ["要點1", "要點2", "要點3"]}}]}}
 
-每頁 3-5 個繁體中文條列，具體且有說服力。"""
+每頁 3-5 個繁體中文條列，內容必須與該公司實際業務相符。"""
 
     try:
         from openai import OpenAI

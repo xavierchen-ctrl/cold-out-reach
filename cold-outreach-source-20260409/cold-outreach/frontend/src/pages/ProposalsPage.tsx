@@ -321,7 +321,7 @@ function GenerateDialog({
     if (!form.lead_id) return
     setDownloadingPptx(true)
     try {
-      const res = await generatePptxDownload(form.lead_id)
+      const res = await generatePptxDownload(form.lead_id, form.extra_context)
       const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
       a.href = url
