@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  generatePptBrief, createGoogleSlides, uploadPptxTemplate, generatePptxDownload,
+  uploadPptxTemplate, generatePptxDownload,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -286,11 +286,6 @@ function GenerateDialog({
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
   const [templateInfo, setTemplateInfo] = useState('')
   const [downloadingPptx, setDownloadingPptx] = useState(false)
-  const [creatingSlides, setCreatingSlides] = useState(false)
-  const [generatingBrief, setGeneratingBrief] = useState(false)
-  const [brief, setBrief] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [slidesError, setSlidesError] = useState('')
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -303,22 +298,7 @@ function GenerateDialog({
     l.company_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const busy = generating || uploadingTemplate || downloadingPptx || creatingSlides || generatingBrief
-
-  const handleSaveProposal = async () => {
-    if (!form.lead_id) return
-    setGenerating(true)
-    try {
-      await generateProposal(form)
-      onGenerated()
-      onClose()
-    } catch (e: unknown) {
-      const msg = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`提案產生失敗：${msg || String(e)}`)
-    } finally {
-      setGenerating(false)
-    }
-  }
+  const busy = generating || uploadingTemplate || downloadingPptx
 
   const handleUploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -358,36 +338,6 @@ function GenerateDialog({
       }
     } finally {
       setDownloadingPptx(false)
-    }
-  }
-
-  const handleCreateSlides = async () => {
-    if (!form.lead_id) return
-    setCreatingSlides(true)
-    setSlidesError('')
-    try {
-      const res = await createGoogleSlides(form.lead_id)
-      window.open(res.data.url, '_blank')
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      setSlidesError(msg || '建立失敗，請稍後再試')
-    } finally {
-      setCreatingSlides(false)
-    }
-  }
-
-  const handleGenerateBrief = async () => {
-    if (!form.lead_id) return
-    setGeneratingBrief(true)
-    setBrief('')
-    try {
-      const res = await generatePptBrief(form.lead_id)
-      setBrief(res.data.brief)
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`生成失敗：${msg || String(err)}`)
-    } finally {
-      setGeneratingBrief(false)
     }
   }
 
@@ -477,75 +427,15 @@ function GenerateDialog({
             <input id="pptx-tpl-input" type="file" accept=".pptx" className="hidden" onChange={handleUploadTemplate} />
           </div>
 
-          {/* 輸出方式 */}
-          <div className="space-y-2 border-t pt-3">
-            <Button
-              className="w-full"
-              onClick={handleDownloadPptx}
-              disabled={!form.lead_id || busy}
-            >
+          {/* 操作按鈕 */}
+          <div className="flex justify-end gap-2 border-t pt-3">
+            <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
+            <Button onClick={handleDownloadPptx} disabled={!form.lead_id || busy}>
               {downloadingPptx
                 ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（套用模板設計）</>}
+                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX</>}
             </Button>
-
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={handleGenerateBrief} disabled={!form.lead_id || busy}>
-                {generatingBrief
-                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-                  : '✨ 生成文字素材'}
-              </Button>
-              <Button variant="outline" onClick={handleCreateSlides} disabled={!form.lead_id || busy}>
-                {creatingSlides
-                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />建立中...</>
-                  : '🔗 建立 Google 簡報'}
-              </Button>
-            </div>
-
-            {slidesError && (
-              <div className="p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                {slidesError}
-                {slidesError.includes('重新連結') && (
-                  <a href="/settings" className="ml-2 underline font-medium">前往設定</a>
-                )}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 pt-1">
-              <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
-              <Button variant="outline" onClick={handleSaveProposal} disabled={!form.lead_id || busy}>
-                {generating
-                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-                  : <><Plus className="w-4 h-4 mr-1.5" />產生並儲存提案</>}
-              </Button>
-            </div>
           </div>
-
-          {/* 文字素材輸出 */}
-          {brief && (
-            <div className="space-y-3 border-t pt-3">
-              <textarea
-                value={brief}
-                onChange={e => setBrief(e.target.value)}
-                rows={16}
-                className="w-full text-sm font-mono border rounded-lg p-3 resize-none focus:outline-none focus:ring-2 focus:ring-blue-300"
-              />
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">可直接編輯後複製</p>
-                <button
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${copied ? 'bg-green-50 text-green-700 border-green-200' : 'hover:bg-slate-50'}`}
-                  onClick={() => { navigator.clipboard.writeText(brief); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
-                >
-                  {copied ? <><CheckCheck className="w-3.5 h-3.5" />已複製！</> : <><Copy className="w-3.5 h-3.5" />複製全部</>}
-                </button>
-              </div>
-              <div className="p-3 bg-blue-50 rounded-lg text-xs text-blue-700 space-y-1">
-                <p className="font-medium">貼入以下工具即可產出簡報：</p>
-                <p>• <strong>Gamma.app</strong> → 新增簡報 → 貼上文字 → AI 生成</p>
-                <p>• <strong>Canva</strong> → Magic Design → 貼上描述</p>
-              </div>
-            </div>
-          )}
         </div>
       </DialogContent>
     </Dialog>
