@@ -1303,13 +1303,15 @@ async def generate_pptx(
         prs.save(output)
         output.seek(0)
 
+        from urllib.parse import quote
         safe_name = re.sub(r"[^\w一-鿿]", "_", lead.company_name)
         filename = f"{safe_name}_提案簡報.pptx"
+        encoded_filename = quote(filename)
 
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+            headers={"Content-Disposition": f"attachment; filename=\"proposal.pptx\"; filename*=UTF-8''{encoded_filename}"},
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PPTX 生成失敗：{str(e)}")
