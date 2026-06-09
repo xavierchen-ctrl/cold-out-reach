@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  generatePptBrief, createGoogleSlides,
+  generatePptBrief, createGoogleSlides, uploadPptxTemplate, generatePptxDownload,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -276,6 +276,9 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
   const [brief, setBrief] = useState('')
   const [copied, setCopied] = useState(false)
   const [slidesError, setSlidesError] = useState('')
+  const [uploadingTemplate, setUploadingTemplate] = useState(false)
+  const [templateInfo, setTemplateInfo] = useState<string>('')
+  const [downloadingPptx, setDownloadingPptx] = useState(false)
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -318,6 +321,47 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
     }
   }
 
+  const handleUploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingTemplate(true)
+    setTemplateInfo('')
+    try {
+      const res = await uploadPptxTemplate(file)
+      setTemplateInfo(res.data.message)
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(`上傳失敗：${msg || String(err)}`)
+    } finally {
+      setUploadingTemplate(false)
+      e.target.value = ''
+    }
+  }
+
+  const handleDownloadPptx = async () => {
+    if (!selectedId) return
+    setDownloadingPptx(true)
+    try {
+      const res = await generatePptxDownload(selectedId)
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = '提案簡報.pptx'
+      a.click()
+      window.URL.revokeObjectURL(url)
+    } catch (err: unknown) {
+      const blob = (err as { response?: { data?: Blob } })?.response?.data
+      if (blob instanceof Blob) {
+        const text = await blob.text()
+        try { alert(`下載失敗：${JSON.parse(text).detail}`) } catch { alert(`下載失敗：${text}`) }
+      } else {
+        alert(`下載失敗：${String(err)}`)
+      }
+    } finally {
+      setDownloadingPptx(false)
+    }
+  }
+
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -351,6 +395,34 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
             </Select>
           </div>
 
+          {/* PPTX 模板上傳 */}
+          <div className="p-3 bg-slate-50 border rounded-lg space-y-2">
+            <p className="text-xs font-medium text-slate-700">📁 PPTX 設計模板（選填）</p>
+            <p className="text-xs text-muted-foreground">上傳你的 PPTX 模板，AI 會將內容套入你的設計風格</p>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs"
+                disabled={uploadingTemplate}
+                onClick={() => document.getElementById('pptx-template-input')?.click()}
+                type="button"
+              >
+                {uploadingTemplate
+                  ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />上傳中...</>
+                  : <><Upload className="w-3 h-3 mr-1" />選擇 .pptx 檔案</>}
+              </Button>
+              {templateInfo && <span className="text-xs text-green-600">✓ {templateInfo}</span>}
+            </label>
+            <input
+              id="pptx-template-input"
+              type="file"
+              accept=".pptx"
+              className="hidden"
+              onChange={handleUploadTemplate}
+            />
+          </div>
+
           <div className="grid grid-cols-2 gap-2">
             <Button
               onClick={handleGenerate}
@@ -370,6 +442,17 @@ function BriefDialog({ onClose }: { onClose: () => void }) {
                 : '🔗 建立 Google 簡報'}
             </Button>
           </div>
+
+          <Button
+            onClick={handleDownloadPptx}
+            disabled={!selectedId || downloadingPptx}
+            variant="outline"
+            className="w-full"
+          >
+            {downloadingPptx
+              ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
+              : <><Download className="w-4 h-4 mr-1.5" />📥 下載 PPTX（套用模板設計）</>}
+          </Button>
 
           {slidesError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">

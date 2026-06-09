@@ -1,9 +1,12 @@
 ﻿import os
+import io
 import json
 import re
 from datetime import timedelta
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import StreamingResponse
+from pptx import Presentation as PptxPresentation
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import httpx
@@ -1087,3 +1090,160 @@ async def create_google_slides(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Google Slides 建立失敗：{str(e)}")
+
+
+# ── PPTX 模板上傳與生成 ────────────────────────────────────────────────────────
+
+PPTX_TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "/tmp")
+
+
+def _fill_pptx_slide(slide, title_text: str, bullets: list):
+    title_done = False
+    body_done = False
+
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        ph = getattr(shape, "placeholder_format", None)
+        if ph is None:
+            continue
+        if ph.idx == 0 and not title_done:
+            shape.text_frame.text = title_text
+            title_done = True
+        elif ph.idx in (1, 2) and not body_done:
+            tf = shape.text_frame
+            tf.text = bullets[0] if bullets else ""
+            for b in bullets[1:]:
+                p = tf.add_paragraph()
+                p.text = b
+            body_done = True
+
+    if not title_done or not body_done:
+        non_ph = sorted(
+            [s for s in slide.shapes if s.has_text_frame and getattr(s, "placeholder_format", None) is None],
+            key=lambda s: s.top,
+        )
+        for j, shape in enumerate(non_ph):
+            if j == 0 and not title_done:
+                shape.text_frame.text = title_text
+                title_done = True
+            elif j == 1 and not body_done:
+                tf = shape.text_frame
+                tf.text = bullets[0] if bullets else ""
+                for b in bullets[1:]:
+                    p = tf.add_paragraph()
+                    p.text = b
+                body_done = True
+
+
+@router.post("/upload-pptx-template")
+async def upload_pptx_template(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """上傳 PPTX 設計模板，供後續生成簡報使用。"""
+    if not (file.filename or "").lower().endswith(".pptx"):
+        raise HTTPException(status_code=400, detail="請上傳 .pptx 格式的檔案")
+
+    os.makedirs(PPTX_TEMPLATES_DIR, exist_ok=True)
+    template_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}.pptx")
+
+    content = await file.read()
+    with open(template_path, "wb") as f:
+        f.write(content)
+
+    prs = PptxPresentation(io.BytesIO(content))
+    return {"ok": True, "slide_count": len(prs.slides), "message": f"模板上傳成功（共 {len(prs.slides)} 頁）"}
+
+
+@router.post("/generate-pptx")
+async def generate_pptx(
+    body: PptBriefRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """用 OpenAI 生成簡報內容，套入 PPTX 模板後回傳可下載檔案。"""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    template_path = os.path.join(PPTX_TEMPLATES_DIR, f"pptx_tpl_{current_user.id}.pptx")
+    if not os.path.exists(template_path):
+        raise HTTPException(status_code=404, detail="尚未上傳 PPTX 模板，請先上傳模板檔案")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    prs_check = PptxPresentation(template_path)
+    n_slides = len(prs_check.slides)
+
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    score = lead.enriched_score or 0
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v) or "無"
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v) or "無"
+
+    all_topics = [
+        f"關於 {lead.company_name}（公司概況、產業定位）",
+        "主要產品與服務",
+        "數位行銷現況分析",
+        "市場機會與挑戰",
+        "潮網建議合作方向",
+        "下一步行動計畫",
+    ]
+    topics_str = "\n".join(f"{i+1}. {t}" for i, t in enumerate(all_topics[:n_slides]))
+
+    prompt = f"""你是潮網科技的業務顧問。請根據以下廠商資訊，生成一份 {n_slides} 頁簡報的內容。
+
+廠商資訊：
+- 公司：{lead.company_name}
+- 產業：{lead.industry or "未知"}
+- 城市：{lead.city or "台灣"}
+- 官網：{lead.website or "未知"}
+- 規模：{lead.company_size or "未知"}
+- 含金量：{score}/100
+- 追蹤工具：{tech_str}
+- 廣告投放：{ad_str}
+
+頁面主題（依序）：
+{topics_str}
+
+只輸出 JSON：
+{{"slides": [{{"title": "標題", "bullets": ["要點1", "要點2", "要點3"]}}]}}
+
+每頁 3-5 個繁體中文條列，具體且有說服力。"""
+
+    try:
+        from openai import OpenAI
+        oai = OpenAI(api_key=OPENAI_API_KEY)
+        resp = oai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            response_format={"type": "json_object"},
+        )
+        slide_content = json.loads(resp.choices[0].message.content.strip())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 內容生成失敗：{str(e)}")
+
+    try:
+        prs = PptxPresentation(template_path)
+        slides_data = slide_content.get("slides", [])
+        for i, slide in enumerate(prs.slides):
+            if i >= len(slides_data):
+                break
+            _fill_pptx_slide(slide, slides_data[i].get("title", ""), slides_data[i].get("bullets", []))
+
+        output = io.BytesIO()
+        prs.save(output)
+        output.seek(0)
+
+        safe_name = re.sub(r"[^\w一-鿿]", "_", lead.company_name)
+        filename = f"{safe_name}_提案簡報.pptx"
+
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PPTX 生成失敗：{str(e)}")

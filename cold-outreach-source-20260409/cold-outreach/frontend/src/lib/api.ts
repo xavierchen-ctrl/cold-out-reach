@@ -336,3 +336,14 @@ export const generatePptBrief = (lead_id: string) =>
 // ── Google Slides 簡報建立 ────────────────────────────────────────────────────
 export const createGoogleSlides = (lead_id: string) =>
   api.post('/ai/create-slides', { lead_id })
+
+// ── PPTX 模板上傳與生成 ───────────────────────────────────────────────────────
+export const uploadPptxTemplate = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/ai/upload-pptx-template', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+export const generatePptxDownload = (lead_id: string) =>
+  api.post('/ai/generate-pptx', { lead_id }, { responseType: 'blob' })
