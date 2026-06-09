@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  uploadPptxTemplate, generatePptxDownload,
+  uploadPptxTemplate, generatePptxContent,
 } from '@/lib/api'
+import { generatePptxBlob } from '@/lib/pptxGenerator'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -321,21 +322,18 @@ function GenerateDialog({
     if (!form.lead_id) return
     setDownloadingPptx(true)
     try {
-      const res = await generatePptxDownload(form.lead_id, form.extra_context, templateInfo !== '')
-      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const res = await generatePptxContent(form.lead_id, form.extra_context)
+      const data = res.data
+      const blob = await generatePptxBlob(data)
+      const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = '提案簡報.pptx'
+      a.download = `${data.company_name}_提案簡報.pptx`
       a.click()
       window.URL.revokeObjectURL(url)
     } catch (err: unknown) {
-      const blob = (err as { response?: { data?: Blob } })?.response?.data
-      if (blob instanceof Blob) {
-        const text = await blob.text()
-        try { alert(`下載失敗：${JSON.parse(text).detail}`) } catch { alert(`下載失敗：${text}`) }
-      } else {
-        alert(`下載失敗：${String(err)}`)
-      }
+      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+      alert(`下載失敗：${detail || String(err)}`)
     } finally {
       setDownloadingPptx(false)
     }
