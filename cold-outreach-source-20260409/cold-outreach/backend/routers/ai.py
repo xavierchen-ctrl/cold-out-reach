@@ -1097,10 +1097,6 @@ async def create_google_slides(
 PPTX_TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "/tmp")
 
 
-import logging as _logging
-_pptx_log = _logging.getLogger("pptx_fill")
-
-
 def _collect_text_shapes(shapes):
     """Recursively collect all shapes with text frames, including inside group shapes."""
     result = []
@@ -1158,9 +1154,8 @@ def _write_lines_to_tf(tf, lines: list):
 
 def _fill_pptx_slide(slide, title_text: str, bullets: list):
     all_shapes = _collect_text_shapes(slide.shapes)
-    _pptx_log.info("Slide shapes with text: %d", len(all_shapes))
+    print(f"[PPTX] slide text shapes: {len(all_shapes)}")
 
-    # Prefer placeholder shapes first
     title_shape, body_shape = None, None
     for shape in all_shapes:
         try:
@@ -1174,31 +1169,32 @@ def _fill_pptx_slide(slide, title_text: str, bullets: list):
         except Exception:
             pass
 
-    # Fallback: pick by vertical position among non-placeholder text boxes
     if title_shape is None or body_shape is None:
         non_ph = sorted(
             [s for s in all_shapes if not _has_placeholder(s)],
             key=lambda s: getattr(s, "top", 0),
         )
-        _pptx_log.info("Non-placeholder text shapes: %d", len(non_ph))
+        print(f"[PPTX] non-placeholder shapes: {len(non_ph)}")
         if non_ph and title_shape is None:
             title_shape = non_ph[0]
         if len(non_ph) > 1 and body_shape is None:
             body_shape = non_ph[1]
 
-    _pptx_log.info("title_shape=%s  body_shape=%s", title_shape, body_shape)
+    print(f"[PPTX] title_shape={title_shape is not None}  body_shape={body_shape is not None}")
 
     if title_shape:
         try:
             _write_lines_to_tf(title_shape.text_frame, [title_text])
+            print(f"[PPTX] title set: {title_text[:30]}")
         except Exception as e:
-            _pptx_log.warning("title fill error: %s", e)
+            print(f"[PPTX] title fill error: {e}")
 
     if body_shape:
         try:
             _write_lines_to_tf(body_shape.text_frame, bullets)
+            print(f"[PPTX] body set: {len(bullets)} bullets")
         except Exception as e:
-            _pptx_log.warning("body fill error: %s", e)
+            print(f"[PPTX] body fill error: {e}")
 
 
 def _has_placeholder(shape):
