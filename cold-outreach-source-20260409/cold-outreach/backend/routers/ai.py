@@ -1097,6 +1097,56 @@ async def create_google_slides(
 PPTX_TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "/tmp")
 
 
+def _set_tf_lines(tf, lines: list):
+    """Replace text frame content with lines, preserving run-level XML formatting."""
+    from pptx.oxml.ns import qn
+    from lxml import etree
+    import copy as _copy
+
+    txBody = tf._txBody
+    existing = txBody.findall(qn("a:p"))
+    if not existing:
+        return
+
+    first_p = existing[0]
+
+    def _make_para(template_p, text: str):
+        p = _copy.deepcopy(template_p)
+        for r in p.findall(qn("a:r")):
+            p.remove(r)
+        r_el = etree.SubElement(p, qn("a:r"))
+        # Copy rPr from first run if available
+        orig_runs = template_p.findall(qn("a:r"))
+        if orig_runs:
+            orig_rpr = orig_runs[0].find(qn("a:rPr"))
+            if orig_rpr is not None:
+                r_el.insert(0, _copy.deepcopy(orig_rpr))
+        t_el = etree.SubElement(r_el, qn("a:t"))
+        t_el.text = text
+        return p
+
+    # Fill / replace existing paragraphs
+    for i, line in enumerate(lines):
+        if i < len(existing):
+            p = existing[i]
+            runs = p.findall(qn("a:r"))
+            if runs:
+                runs[0].find(qn("a:t")).text = line
+                for r in runs[1:]:
+                    p.remove(r)
+            else:
+                r_el = etree.SubElement(p, qn("a:r"))
+                t_el = etree.SubElement(r_el, qn("a:t"))
+                t_el.text = line
+        else:
+            txBody.append(_make_para(first_p, line))
+
+    # Remove surplus paragraphs (keep at least 1)
+    current = txBody.findall(qn("a:p"))
+    for p in current[max(1, len(lines)):]:
+        txBody.remove(p)
+
+
 def _fill_pptx_slide(slide, title_text: str, bullets: list):
     title_done = False
     body_done = False
@@ -1104,36 +1154,52 @@ def _fill_pptx_slide(slide, title_text: str, bullets: list):
     for shape in slide.shapes:
         if not shape.has_text_frame:
             continue
-        ph = getattr(shape, "placeholder_format", None)
+        try:
+            ph = shape.placeholder_format
+        except Exception:
+            ph = None
         if ph is None:
             continue
-        if ph.idx == 0 and not title_done:
-            shape.text_frame.text = title_text
-            title_done = True
-        elif ph.idx in (1, 2) and not body_done:
-            tf = shape.text_frame
-            tf.text = bullets[0] if bullets else ""
-            for b in bullets[1:]:
-                p = tf.add_paragraph()
-                p.text = b
-            body_done = True
+        try:
+            idx = ph.idx
+        except Exception:
+            continue
+        try:
+            if idx == 0 and not title_done:
+                _set_tf_lines(shape.text_frame, [title_text])
+                title_done = True
+            elif idx in (1, 2) and not body_done:
+                _set_tf_lines(shape.text_frame, bullets)
+                body_done = True
+        except Exception:
+            continue
 
     if not title_done or not body_done:
-        non_ph = sorted(
-            [s for s in slide.shapes if s.has_text_frame and getattr(s, "placeholder_format", None) is None],
-            key=lambda s: s.top,
-        )
-        for j, shape in enumerate(non_ph):
-            if j == 0 and not title_done:
-                shape.text_frame.text = title_text
-                title_done = True
-            elif j == 1 and not body_done:
-                tf = shape.text_frame
-                tf.text = bullets[0] if bullets else ""
-                for b in bullets[1:]:
-                    p = tf.add_paragraph()
-                    p.text = b
-                body_done = True
+        candidates = []
+        for s in slide.shapes:
+            if not s.has_text_frame:
+                continue
+            try:
+                if s.placeholder_format is not None:
+                    continue
+            except Exception:
+                continue
+            try:
+                candidates.append((s.top, s))
+            except Exception:
+                continue
+        candidates.sort(key=lambda x: x[0])
+
+        for j, (_, shape) in enumerate(candidates):
+            try:
+                if j == 0 and not title_done:
+                    _set_tf_lines(shape.text_frame, [title_text])
+                    title_done = True
+                elif j == 1 and not body_done:
+                    _set_tf_lines(shape.text_frame, bullets)
+                    body_done = True
+            except Exception:
+                continue
 
 
 @router.post("/upload-pptx-template")
