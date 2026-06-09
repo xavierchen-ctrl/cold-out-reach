@@ -1097,109 +1097,115 @@ async def create_google_slides(
 PPTX_TEMPLATES_DIR = os.getenv("TEMPLATES_DIR", "/tmp")
 
 
-def _set_tf_lines(tf, lines: list):
-    """Replace text frame content with lines, preserving run-level XML formatting."""
+import logging as _logging
+_pptx_log = _logging.getLogger("pptx_fill")
+
+
+def _collect_text_shapes(shapes):
+    """Recursively collect all shapes with text frames, including inside group shapes."""
+    result = []
+    for shape in shapes:
+        try:
+            if hasattr(shape, "shapes"):  # group shape
+                result.extend(_collect_text_shapes(shape.shapes))
+            elif shape.has_text_frame:
+                result.append(shape)
+        except Exception:
+            pass
+    return result
+
+
+def _write_lines_to_tf(tf, lines: list):
+    """Write lines into a text frame using direct XML manipulation."""
     from pptx.oxml.ns import qn
     from lxml import etree
-    import copy as _copy
+    import copy as _cp
 
     txBody = tf._txBody
-    existing = txBody.findall(qn("a:p"))
-    if not existing:
-        return
+    paras = txBody.findall(qn("a:p"))
+    if not paras:
+        return False
 
-    first_p = existing[0]
+    first_p = paras[0]
 
-    def _make_para(template_p, text: str):
-        p = _copy.deepcopy(template_p)
-        for r in p.findall(qn("a:r")):
-            p.remove(r)
-        r_el = etree.SubElement(p, qn("a:r"))
-        # Copy rPr from first run if available
-        orig_runs = template_p.findall(qn("a:r"))
-        if orig_runs:
-            orig_rpr = orig_runs[0].find(qn("a:rPr"))
-            if orig_rpr is not None:
-                r_el.insert(0, _copy.deepcopy(orig_rpr))
-        t_el = etree.SubElement(r_el, qn("a:t"))
-        t_el.text = text
-        return p
-
-    # Fill / replace existing paragraphs
     for i, line in enumerate(lines):
-        if i < len(existing):
-            p = existing[i]
-            runs = p.findall(qn("a:r"))
-            if runs:
-                runs[0].find(qn("a:t")).text = line
-                for r in runs[1:]:
-                    p.remove(r)
-            else:
-                r_el = etree.SubElement(p, qn("a:r"))
-                t_el = etree.SubElement(r_el, qn("a:t"))
-                t_el.text = line
+        if i < len(paras):
+            p = paras[i]
         else:
-            txBody.append(_make_para(first_p, line))
+            p = _cp.deepcopy(first_p)
+            for r in p.findall(qn("a:r")):
+                p.remove(r)
+            txBody.append(p)
 
-    # Remove surplus paragraphs (keep at least 1)
+        runs = p.findall(qn("a:r"))
+        if runs:
+            t_el = runs[0].find(qn("a:t"))
+            if t_el is not None:
+                t_el.text = line
+            for r in runs[1:]:
+                p.remove(r)
+        else:
+            r_el = etree.SubElement(p, qn("a:r"))
+            t_el = etree.SubElement(r_el, qn("a:t"))
+            t_el.text = line
+
+    # Remove surplus paragraphs
     current = txBody.findall(qn("a:p"))
     for p in current[max(1, len(lines)):]:
         txBody.remove(p)
+    return True
 
 
 def _fill_pptx_slide(slide, title_text: str, bullets: list):
-    title_done = False
-    body_done = False
+    all_shapes = _collect_text_shapes(slide.shapes)
+    _pptx_log.info("Slide shapes with text: %d", len(all_shapes))
 
-    for shape in slide.shapes:
-        if not shape.has_text_frame:
-            continue
+    # Prefer placeholder shapes first
+    title_shape, body_shape = None, None
+    for shape in all_shapes:
         try:
             ph = shape.placeholder_format
+            if ph is None:
+                continue
+            if ph.idx == 0 and title_shape is None:
+                title_shape = shape
+            elif ph.idx in (1, 2) and body_shape is None:
+                body_shape = shape
         except Exception:
-            ph = None
-        if ph is None:
-            continue
-        try:
-            idx = ph.idx
-        except Exception:
-            continue
-        try:
-            if idx == 0 and not title_done:
-                _set_tf_lines(shape.text_frame, [title_text])
-                title_done = True
-            elif idx in (1, 2) and not body_done:
-                _set_tf_lines(shape.text_frame, bullets)
-                body_done = True
-        except Exception:
-            continue
+            pass
 
-    if not title_done or not body_done:
-        candidates = []
-        for s in slide.shapes:
-            if not s.has_text_frame:
-                continue
-            try:
-                if s.placeholder_format is not None:
-                    continue
-            except Exception:
-                continue
-            try:
-                candidates.append((s.top, s))
-            except Exception:
-                continue
-        candidates.sort(key=lambda x: x[0])
+    # Fallback: pick by vertical position among non-placeholder text boxes
+    if title_shape is None or body_shape is None:
+        non_ph = sorted(
+            [s for s in all_shapes if not _has_placeholder(s)],
+            key=lambda s: getattr(s, "top", 0),
+        )
+        _pptx_log.info("Non-placeholder text shapes: %d", len(non_ph))
+        if non_ph and title_shape is None:
+            title_shape = non_ph[0]
+        if len(non_ph) > 1 and body_shape is None:
+            body_shape = non_ph[1]
 
-        for j, (_, shape) in enumerate(candidates):
-            try:
-                if j == 0 and not title_done:
-                    _set_tf_lines(shape.text_frame, [title_text])
-                    title_done = True
-                elif j == 1 and not body_done:
-                    _set_tf_lines(shape.text_frame, bullets)
-                    body_done = True
-            except Exception:
-                continue
+    _pptx_log.info("title_shape=%s  body_shape=%s", title_shape, body_shape)
+
+    if title_shape:
+        try:
+            _write_lines_to_tf(title_shape.text_frame, [title_text])
+        except Exception as e:
+            _pptx_log.warning("title fill error: %s", e)
+
+    if body_shape:
+        try:
+            _write_lines_to_tf(body_shape.text_frame, bullets)
+        except Exception as e:
+            _pptx_log.warning("body fill error: %s", e)
+
+
+def _has_placeholder(shape):
+    try:
+        return shape.placeholder_format is not None
+    except Exception:
+        return False
 
 
 @router.post("/upload-pptx-template")
