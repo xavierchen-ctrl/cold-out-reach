@@ -425,6 +425,18 @@ function addContentSlide(
   addFooter(slide as PptxSlide, companyName, title)
 }
 
+// ── Company intro slides (P2-P10 from Wavenet reference PDF, pre-rendered as images) ──
+async function addCompanyIntroSlides(pptx: pptxgen) {
+  for (let i = 2; i <= 10; i++) {
+    const slide = pptx.addSlide()
+    const pageNum = String(i).padStart(2, '0')
+    slide.addImage({
+      path: `/company-slides/page-${pageNum}.png`,
+      x: 0, y: 0, w: 13.33, h: 7.5,
+    })
+  }
+}
+
 // ── Public entry point ─────────────────────────────────────────────────────────
 export async function generatePptxBlob(data: PptxContentResponse): Promise<Blob> {
   const pptx = new pptxgen()
@@ -435,6 +447,7 @@ export async function generatePptxBlob(data: PptxContentResponse): Promise<Blob>
   pptx.title   = `${data.company_name} 提案簡報`
 
   addCoverSlide(pptx, data.company_name, data.industry)
+  await addCompanyIntroSlides(pptx)
 
   data.slides.forEach((sd, i) => {
     addContentSlide(pptx, i + 1, data.slides.length, sd.title, sd.bullets, data.company_name)
