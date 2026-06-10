@@ -28,9 +28,8 @@ function ScoreBadge({ score }: { score: number | null }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>{score}</span>
 }
 
-const IVY_NAME = 'Ivy 張'
 function isApprover(user?: { role?: string; name?: string } | null) {
-  return user?.role === 'team_lead' || user?.role === 'admin' || user?.role === 'manager' || user?.name === IVY_NAME
+  return user?.role === 'team_lead' || user?.role === 'admin' || user?.role === 'manager'
 }
 
 // Tabs vary by role: sales cannot see scraper tab; approvers get 待審核 tab
@@ -482,7 +481,7 @@ function ApprovalTab({ onResolved }: { onResolved: () => void }) {
 
             <div className="flex flex-wrap gap-4 text-sm">
               <div>小組長：{decisionLabel(item.team_lead_decision)}{item.team_lead_reviewer_name ? ` (${item.team_lead_reviewer_name})` : ''}</div>
-              <div>Ivy 張：{decisionLabel(item.ivy_decision)}{item.ivy_reviewer_name ? ` (${item.ivy_reviewer_name})` : ''}</div>
+              <div>Manager：{decisionLabel(item.ivy_decision)}{item.ivy_reviewer_name ? ` (${item.ivy_reviewer_name})` : ''}</div>
               {item.review_note && <div className="text-muted-foreground">備註：{item.review_note}</div>}
             </div>
 

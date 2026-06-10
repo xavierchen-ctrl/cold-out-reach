@@ -10,11 +10,9 @@ from utils import now_tw
 
 router = APIRouter(prefix="/api/approvals", tags=["approvals"])
 
-IVY_NAME = "Ivy 張"
-
 
 def _is_approver(user: User) -> bool:
-    return user.role in (UserRole.team_lead, UserRole.admin, UserRole.manager) or user.name == IVY_NAME
+    return user.role in (UserRole.team_lead, UserRole.admin, UserRole.manager)
 
 
 class ReviewRequest(BaseModel):
@@ -87,10 +85,10 @@ def review_approval(
     if body.decision not in ("approved", "rejected"):
         raise HTTPException(status_code=400, detail="decision 必須是 approved 或 rejected")
 
-    is_ivy = current_user.name == IVY_NAME
-    is_team_lead = current_user.role in (UserRole.team_lead, UserRole.admin, UserRole.manager)
+    is_manager = current_user.role in (UserRole.admin, UserRole.manager)
+    is_team_lead = current_user.role in (UserRole.team_lead, UserRole.admin)
 
-    if is_ivy:
+    if is_manager:
         approval.ivy_decision = body.decision
         approval.ivy_reviewer_id = current_user.id
     if is_team_lead:
