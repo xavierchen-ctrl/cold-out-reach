@@ -190,6 +190,7 @@ function TagsTab() {
 const ROLE_LABELS: Record<string, string> = {
   admin: '管理員',
   manager: '主管',
+  team_lead: '小組長',
   sales: '業務',
 }
 
@@ -303,6 +304,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
           <SelectContent>
             <SelectItem value="__all__">全部權限</SelectItem>
             <SelectItem value="sales">業務</SelectItem>
+            <SelectItem value="team_lead">小組長</SelectItem>
             <SelectItem value="manager">主管</SelectItem>
             <SelectItem value="admin">管理員</SelectItem>
           </SelectContent>
@@ -388,6 +390,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="sales">業務</SelectItem>
+                  <SelectItem value="team_lead">小組長</SelectItem>
                   <SelectItem value="manager">主管</SelectItem>
                   <SelectItem value="admin">管理員</SelectItem>
                 </SelectContent>
@@ -418,6 +421,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="sales">業務</SelectItem>
+                  <SelectItem value="team_lead">小組長</SelectItem>
                   <SelectItem value="manager">主管</SelectItem>
                   <SelectItem value="admin">管理員</SelectItem>
                 </SelectContent>
