@@ -34,7 +34,7 @@ function isApprover(user?: { role?: string; name?: string } | null) {
 
 // Tabs vary by role: sales cannot see scraper tab; approvers get 待審核 tab
 function getAvailableTabs(role?: string, approver?: boolean) {
-  const base = role === 'sales' ? ['手動管理', 'CSV 匯入'] : ['手動管理', 'CSV 匯入', '會展爬取']
+  const base = ['手動管理', 'CSV 匯入', '會展爬取']
   if (approver) base.push('待審核')
   return base as Tab[]
 }
