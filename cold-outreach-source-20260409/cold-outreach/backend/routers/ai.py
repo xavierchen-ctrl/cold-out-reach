@@ -1301,6 +1301,7 @@ class GeneratePptxRequest(BaseModel):
     lead_id: str
     extra_context: str = ""
     use_template: bool = False  # True only when user explicitly uploaded a template this session
+    context_images: list[str] = []  # data URLs (data:image/...;base64,...) uploaded by user
 
 
 def _build_pptx_from_scratch(slides_data: list, company_name: str) -> io.BytesIO:
@@ -1601,9 +1602,16 @@ async def generate_pptx_content(
     try:
         from openai import OpenAI
         oai = OpenAI(api_key=OPENAI_API_KEY)
+        if body.context_images:
+            content: list = [{"type": "text", "text": prompt}]
+            for img_url in body.context_images[:4]:  # max 4 images
+                content.append({"type": "image_url", "image_url": {"url": img_url, "detail": "low"}})
+            messages = [{"role": "user", "content": content}]
+        else:
+            messages = [{"role": "user", "content": prompt}]
         resp = oai.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
+            messages=messages,
             response_format={"type": "json_object"},
         )
         slide_content = json.loads(resp.choices[0].message.content.strip())

@@ -348,5 +348,5 @@ export const uploadPptxTemplate = (file: File) => {
 export const generatePptxDownload = (lead_id: string, extra_context?: string, use_template?: boolean) =>
   api.post('/ai/generate-pptx', { lead_id, extra_context: extra_context || '', use_template: use_template ?? false }, { responseType: 'blob' })
 
-export const generatePptxContent = (lead_id: string, extra_context?: string) =>
-  api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false })
+export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[]) =>
+  api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [] })

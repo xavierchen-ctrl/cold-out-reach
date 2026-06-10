@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import {
   Plus, Trash2, Mail, ChevronDown, ChevronUp, Copy, CheckCheck,
   Loader2, FileText, BarChart3, Lightbulb, DollarSign, Building2, Download,
-  Upload, CheckCircle2, X, FolderOpen,
+  Upload, CheckCircle2, X, FolderOpen, Paperclip,
 } from 'lucide-react'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -282,6 +282,7 @@ function GenerateDialog({
     budget_range: '50-100萬/月',
     extra_context: '',
   })
+  const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
   const [uploadingTemplate, setUploadingTemplate] = useState(false)
@@ -300,6 +301,19 @@ function GenerateDialog({
   )
 
   const busy = generating || uploadingTemplate || downloadingPptx
+
+  const handleContextFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    Array.from(e.target.files || []).forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = ev => setContextFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+        reader.readAsDataURL(file)
+      } else {
+        setContextFiles(prev => [...prev, { file }])
+      }
+    })
+    e.target.value = ''
+  }
 
   const handleUploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -322,7 +336,16 @@ function GenerateDialog({
     if (!form.lead_id) return
     setDownloadingPptx(true)
     try {
-      const res = await generatePptxContent(form.lead_id, form.extra_context)
+      // Append text-file contents to extra_context
+      let fullContext = form.extra_context
+      for (const cf of contextFiles.filter(cf => !cf.preview)) {
+        const text = await cf.file.text()
+        fullContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
+      }
+      // Collect image data URLs for vision
+      const contextImages = contextFiles.filter(cf => cf.preview).map(cf => cf.preview!)
+
+      const res = await generatePptxContent(form.lead_id, fullContext, contextImages)
       const data = res.data
       const blob = await generatePptxBlob(data)
       const url = window.URL.createObjectURL(blob)
@@ -401,6 +424,55 @@ function GenerateDialog({
               value={form.extra_context}
               onChange={e => setForm(f => ({ ...f, extra_context: e.target.value }))}
             />
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-xs h-7 px-2"
+                type="button"
+                onClick={() => document.getElementById('ctx-file-input')?.click()}
+              >
+                <Paperclip className="w-3 h-3 mr-1" />
+                附加圖片 / 文字檔
+              </Button>
+              <span className="text-xs text-muted-foreground">PNG、JPG、TXT（AI 會一起參考）</span>
+            </div>
+            <input
+              id="ctx-file-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,.txt"
+              multiple
+              className="hidden"
+              onChange={handleContextFileAdd}
+            />
+            {contextFiles.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {contextFiles.map((cf, i) => (
+                  <div key={i} className="relative group">
+                    {cf.preview ? (
+                      <div className="relative w-16 h-16">
+                        <img src={cf.preview} alt={cf.file.name} className="w-16 h-16 object-cover rounded border" />
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[8px] px-1 truncate rounded-b leading-4">
+                          {cf.file.name}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-16 h-16 flex flex-col items-center justify-center border rounded bg-slate-50 gap-1 p-1">
+                        <FileText className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-[9px] text-muted-foreground text-center leading-3 break-all line-clamp-2">{cf.file.name}</span>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-destructive text-white rounded-full items-center justify-center hidden group-hover:flex"
+                      onClick={() => setContextFiles(prev => prev.filter((_, j) => j !== i))}
+                    >
+                      <X className="w-2.5 h-2.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* PPTX 設計模板 */}
