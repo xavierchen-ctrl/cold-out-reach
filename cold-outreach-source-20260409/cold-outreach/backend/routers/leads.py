@@ -5,7 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from sqlalchemy.orm import Session
 from database import get_db
-from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog
+from fastapi.responses import JSONResponse
+from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog, PendingLeadApproval
 from schemas import LeadCreate, LeadUpdate, LeadStatusUpdate, LeadOut, ActivityOut
 from auth import get_current_user, get_visible_user_ids
 
@@ -72,7 +73,7 @@ def list_leads(
     return q.offset(skip).limit(limit).all()
 
 
-@router.post("", response_model=LeadOut)
+@router.post("")
 def create_lead(
     body: LeadCreate,
     db: Session = Depends(get_db),
@@ -80,6 +81,37 @@ def create_lead(
 ):
     if current_user.role == UserRole.sales:
         body.assigned_to = current_user.id
+
+    # ── 同公司不同部門偵測 ──────────────────────────────────────────
+    existing = db.query(Lead).filter(Lead.company_name.ilike(body.company_name)).all()
+    if existing:
+        new_dept = (body.department or "").strip().lower()
+        same_dept_found = any((l.department or "").strip().lower() == new_dept for l in existing)
+        if not same_dept_found:
+            approval = PendingLeadApproval(
+                submitted_by=current_user.id,
+                lead_data=body.model_dump(mode="json"),
+                conflict_company=body.company_name,
+                conflict_lead_id=existing[0].id,
+            )
+            db.add(approval)
+            db.commit()
+            db.refresh(approval)
+            existing_dept_display = existing[0].department or "（未填）"
+            new_dept_display = body.department or "（未填）"
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "pending_approval": True,
+                    "approval_id": str(approval.id),
+                    "message": (
+                        f"「{body.company_name}」已有名單（部門：{existing_dept_display}），"
+                        f"新增部門「{new_dept_display}」需送請小組長及 Ivy 張審核，"
+                        "核准後才會正式建立。"
+                    ),
+                },
+            )
+    # ── 無衝突，直接建立 ──────────────────────────────────────────
     lead = Lead(**body.model_dump())
     db.add(lead)
     db.commit()

@@ -300,3 +300,9 @@ export const generateEmail = (data: {website_url: string, product: string, lead_
 // ── 提案信生成 ─────────────────────────────────────────────────────────────────
 export const generateProposal = (data: { lead_id: string; product: string; tone?: string }) =>
   api.post('/ai/generate-proposal', data)
+
+// ── 名單審核 ──────────────────────────────────────────────────────────────────
+export const getLeadApprovals = () => api.get('/approvals/leads')
+export const getLeadApprovalCount = () => api.get('/approvals/leads/pending-count')
+export const reviewLeadApproval = (id: string, decision: 'approved' | 'rejected', note?: string) =>
+  api.post(`/approvals/leads/${id}/review`, { decision, note })
