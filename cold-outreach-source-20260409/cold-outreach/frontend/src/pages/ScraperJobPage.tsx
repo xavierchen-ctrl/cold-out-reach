@@ -113,7 +113,7 @@ export default function ScraperJobPage() {
       {/* Header */}
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/leads?tab=會展爬取')}>
+          <Button variant="ghost" size="icon" onClick={() => navigate('/leads?tab=名單爬取')}>
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </Button>
           <div>

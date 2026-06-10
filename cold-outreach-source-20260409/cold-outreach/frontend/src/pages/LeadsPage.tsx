@@ -34,11 +34,11 @@ function isApprover(user?: { role?: string; name?: string } | null) {
 
 // Tabs vary by role: sales cannot see scraper tab; approvers get 待審核 tab
 function getAvailableTabs(role?: string, approver?: boolean) {
-  const base = ['手動管理', 'CSV 匯入', '會展爬取']
+  const base = ['手動管理', 'CSV 匯入', '名單爬取']
   if (approver) base.push('待審核')
   return base as Tab[]
 }
-type Tab = '手動管理' | 'CSV 匯入' | '會展爬取' | '待審核'
+type Tab = '手動管理' | 'CSV 匯入' | '名單爬取' | '待審核'
 
 const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string][]
 const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
@@ -1454,7 +1454,7 @@ export default function LeadsPage() {
       )}
 
       {activeTab === 'CSV 匯入' && <CsvImportTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
-      {activeTab === '會展爬取' && <ScraperTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
+      {activeTab === '名單爬取' && <ScraperTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
       {activeTab === '待審核' && <ApprovalTab onResolved={() => { loadLeads(); getLeadApprovalCount().then(r => setPendingCount(r.data?.count ?? 0)).catch(() => {}) }} />}
 
       {/* Create modal */}
