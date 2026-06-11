@@ -365,6 +365,13 @@ async def find_phone_for_company(
                 for url in urls_to_try:
                     try:
                         resp = await client.get(url, timeout=8)
+                        # tel: 連結優先
+                        for tel in _re.findall(r'href=["\']tel:([^"\']+)["\']', resp.text):
+                            digits = _re.sub(r'\D', '', tel.lstrip('+'))
+                            if digits.startswith('886'):
+                                digits = '0' + digits[3:]
+                            if 8 <= len(digits) <= 10 and digits.startswith('0'):
+                                return {"phone": digits[:2] + '-' + digits[2:6] + '-' + digits[6:] if len(digits) == 10 else digits}
                         text = _re.sub(r'<[^>]+>', ' ', resp.text)
                         m = _TW_PHONE.search(text)
                         if m:
@@ -426,6 +433,31 @@ async def find_phone_for_company(
         logger.warning(f"find-phone yellow.com.tw error for {q!r}: {e}")
 
     # 3. DuckDuckGo / Bing / Google 備援
+    def _extract_phone_from_html(html: str) -> _Opt[str]:
+        # 1. tel: 連結（Google Knowledge Panel 常用此格式）
+        for tel in _re.findall(r'href=["\']tel:([^"\']+)["\']', html):
+            digits = _re.sub(r'\D', '', tel.lstrip('+'))
+            if digits.startswith('886'):
+                digits = '0' + digits[3:]
+            if 8 <= len(digits) <= 10 and digits.startswith('0'):
+                if digits.startswith('09') and len(digits) == 10:
+                    return f"{digits[:4]}-{digits[4:7]}-{digits[7:]}"
+                elif len(digits) == 10:
+                    return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
+                elif len(digits) == 9:
+                    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+        # 2. JSON-LD 結構化資料
+        for script in _re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, _re.S):
+            m = _TW_PHONE.search(script)
+            if m:
+                return _re.sub(r'\s+', '-', m.group(1).strip())
+        # 3. 純文字
+        text = _re.sub(r'<[^>]+>', ' ', html)
+        m = _TW_PHONE.search(text)
+        if m:
+            return _re.sub(r'\s+', '-', m.group(1).strip())
+        return None
+
     async def _search_for_phone(client, query: str) -> _Opt[str]:
         sources = [
             f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
@@ -435,16 +467,9 @@ async def find_phone_for_company(
         for url in sources:
             try:
                 resp = await client.get(url, timeout=12)
-                # 先找 JSON-LD 結構化資料
-                for script in _re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', resp.text, _re.S):
-                    m = _TW_PHONE.search(script)
-                    if m:
-                        return _re.sub(r'\s+', '-', m.group(1).strip())
-                # 再找純文字
-                text = _re.sub(r'<[^>]+>', ' ', resp.text)
-                m = _TW_PHONE.search(text)
-                if m:
-                    return _re.sub(r'\s+', '-', m.group(1).strip())
+                result = _extract_phone_from_html(resp.text)
+                if result:
+                    return result
             except Exception:
                 pass
         return None
