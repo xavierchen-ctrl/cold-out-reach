@@ -62,6 +62,7 @@ export default function LeadDetailPage() {
   const [lushaMsg, setLushaMsg] = useState('')
   const [scoring, setScoring] = useState(false)
   const [noteContent, setNoteContent] = useState('')
+  const [hasAddedNote, setHasAddedNote] = useState(false)
   const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'attachments' | 'cadence' | 'calls'>('info')
 
   // Signals / 含金量
@@ -197,7 +198,15 @@ export default function LeadDetailPage() {
     if (!id) return
     setSaving(true)
     try {
-      await updateLead(id, form as Record<string, unknown>)
+      const payload: Record<string, unknown> = { ...(form as Record<string, unknown>) }
+      // Auto-advance: claiming → contacted when at least one call note exists (any session)
+      const hasCallNote = activities.some(a => a.type === 'call_note')
+      if ((lead?.status === 'claiming' || form.status === 'claiming') && hasCallNote) {
+        payload.status = 'contacted'
+        payload.assigned_to = user?.id
+      }
+      await updateLead(id, payload)
+      setHasAddedNote(false)
       await loadLead()
     } finally {
       setSaving(false)
@@ -381,6 +390,7 @@ export default function LeadDetailPage() {
     if (!id || !noteContent.trim()) return
     await createActivity(id, { type: 'call_note', content: noteContent })
     setNoteContent('')
+    setHasAddedNote(true)
     await loadActivities()
   }
 
@@ -1072,9 +1082,16 @@ export default function LeadDetailPage() {
                 />
               </div>
             </div>
-            <div className="mt-4 flex justify-end">
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => changeStatus('called_no_answer')}
+                className="border-amber-400 text-amber-700 hover:bg-amber-50"
+              >
+                📵 已撥打未接
+              </Button>
               <Button onClick={save} disabled={saving}>
-                {saving ? '儲存中...' : '儲存變更'}
+                {saving ? '儲存中...' : (lead?.status === 'claiming' || form.status === 'claiming') && activities.some(a => a.type === 'call_note') ? '儲存並標記已聯繫' : '儲存變更'}
               </Button>
             </div>
           </div>

@@ -54,6 +54,7 @@ export function useAuthProvider(): AuthCtx {
   const signOut = async () => {
     if (DEV_BYPASS) return
     await apiLogout()
+    localStorage.removeItem('access_token')
     setUser(null)
     window.location.href = '/login'
   }

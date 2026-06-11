@@ -32,6 +32,7 @@ export default function Layout() {
           ...(user?.role === 'admin' ? [{ to: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '業績 Dashboard' }] : []),
           { to: '/analytics', icon: <BarChart3 className="w-4 h-4" />, label: '智能分析' },
           { to: '/reports', icon: <FileBarChart2 className="w-4 h-4" />, label: 'AI 週報' },
+          { to: '/proposal', icon: <Presentation className="w-4 h-4" />, label: '提案生成' },
           { to: '/settings', icon: <Settings className="w-4 h-4" />, label: '設定' },
         ].map(item => (
           <NavLink

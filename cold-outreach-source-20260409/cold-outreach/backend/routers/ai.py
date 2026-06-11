@@ -1,4 +1,4 @@
-﻿import os
+import os
 import io
 import json
 import re
@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 import httpx
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from openai import OpenAI
 from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType
 from schemas import DraftRequest, DraftResponse
@@ -22,8 +23,8 @@ router = APIRouter(prefix="/api/ai", tags=["ai"])
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
+
 def _openai_chat(prompt: str, model: str = "gpt-4o-mini") -> str:
-    from openai import OpenAI
     oai = OpenAI(api_key=OPENAI_API_KEY)
     return oai.chat.completions.create(
         model=model,
@@ -32,7 +33,6 @@ def _openai_chat(prompt: str, model: str = "gpt-4o-mini") -> str:
 
 
 def _openai_json(prompt: str, model: str = "gpt-4o-mini") -> dict:
-    from openai import OpenAI
     oai = OpenAI(api_key=OPENAI_API_KEY)
     return json.loads(oai.chat.completions.create(
         model=model,
@@ -98,13 +98,11 @@ BODY:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
-    # Parse subject + body
     subject = ""
     body_text = ""
     if "SUBJECT:" in text and "BODY:" in text:
         parts = text.split("BODY:", 1)
-        subject_line = parts[0].replace("SUBJECT:", "").strip()
-        subject = subject_line
+        subject = parts[0].replace("SUBJECT:", "").strip()
         body_text = parts[1].strip()
     else:
         lines = text.split("\n")
@@ -126,16 +124,14 @@ from urllib.parse import urljoin as _urljoin
 
 _EMAIL_RE = _re.compile(r'[\w.+\-]+@[\w\-]+\.[a-zA-Z]{2,}')
 
-# Taiwan phone: landline (02) 2345-6789, 03-456-7890, mobile 0912-345-678, +886 prefix
 _PHONE_RE = _re.compile(
     r'(?:'
-    r'\(?0[2-8]\)?[-\s\.]{0,2}\d{3,4}[-\s\.]{0,2}\d{4}'   # landline: (02) or 02-
-    r'|\(?09\d{2}\)?[-\s\.]{0,2}\d{3}[-\s\.]{0,2}\d{3}'   # mobile: (09xx) or 09xx-
-    r'|\+886[-\s\.]{0,2}[2-9][-\s\.]{0,2}\d{3,4}[-\s\.]{0,2}\d{4}'  # +886
+    r'\(?0[2-8]\)?[-\s\.]{0,2}\d{3,4}[-\s\.]{0,2}\d{4}'
+    r'|\(?09\d{2}\)?[-\s\.]{0,2}\d{3}[-\s\.]{0,2}\d{3}'
+    r'|\+886[-\s\.]{0,2}[2-9][-\s\.]{0,2}\d{3,4}[-\s\.]{0,2}\d{4}'
     r')'
 )
 
-# Keywords that indicate a contact page (order matters for scoring)
 _CONTACT_KWS = [
     "聯絡我們", "contact-us", "contactus", "contact_us",
     "聯絡", "連絡", "contact",
@@ -143,7 +139,6 @@ _CONTACT_KWS = [
     "about", "關於",
 ]
 
-# Fallback paths to probe when no contact link found in page HTML
 _CONTACT_PATHS = [
     "/contact", "/contact-us", "/contactus", "/contact_us",
     "/about/contact", "/about-us", "/about",
@@ -171,7 +166,6 @@ def _strip_tags(html: str) -> str:
 
 
 def _find_emails(text: str) -> list[str]:
-    # Also handle basic obfuscation like [at] / (at)
     normalized = (
         text
         .replace(" [at] ", "@").replace(" (at) ", "@")
@@ -198,7 +192,6 @@ def _find_phones(text: str) -> list[str]:
     cleaned = []
     seen: set[str] = set()
     for p in found:
-        # Normalise to digits only for dedup
         c = _re.sub(r'[\s\-\.\(\)]', '', p)
         if c not in seen and len(c) >= 8:
             seen.add(c)
@@ -207,7 +200,6 @@ def _find_phones(text: str) -> list[str]:
 
 
 def _extract_jsonld_contacts(html: str) -> dict:
-    """Extract email / phone from JSON-LD structured data embedded in <script> tags."""
     schema_re = _re.compile(
         r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
         _re.DOTALL | _re.IGNORECASE,
@@ -217,7 +209,6 @@ def _extract_jsonld_contacts(html: str) -> dict:
     for match in schema_re.findall(html):
         try:
             data = json.loads(match.strip())
-            # JSON-LD may be a list
             items = data if isinstance(data, list) else [data]
             for item in items:
                 for key in ("email", "Email"):
@@ -228,7 +219,6 @@ def _extract_jsonld_contacts(html: str) -> dict:
                     val = item.get(key)
                     if val and isinstance(val, str):
                         phones.append(val)
-                # contactPoint
                 cp = item.get("contactPoint") or []
                 if isinstance(cp, dict):
                     cp = [cp]
@@ -239,7 +229,6 @@ def _extract_jsonld_contacts(html: str) -> dict:
                         phones.append(point["telephone"])
         except Exception:
             pass
-    # Deduplicate while preserving order
     seen_e: set[str] = set()
     seen_p: set[str] = set()
     emails = [e for e in emails if not (e.lower() in seen_e or seen_e.add(e.lower()))]  # type: ignore[func-returns-value]
@@ -248,28 +237,18 @@ def _extract_jsonld_contacts(html: str) -> dict:
 
 
 async def _scrape_contact_info(website: str) -> dict:
-    """
-    Given a company website URL:
-    1. Fetch homepage and extract JSON-LD structured data
-    2. Discover the "Contact Us" page via scored link matching + fallback paths
-    3. Fetch the contact page and extract JSON-LD / regex email+phone
-    4. Fall back to Gemini if regex finds nothing
-    Returns dict with keys: email, phone, contact_url
-    """
     base = website if website.startswith("http") else f"https://{website}"
 
     try:
         async with httpx.AsyncClient(
             timeout=15, headers=_HTTP_HEADERS, follow_redirects=True
         ) as client:
-            # ── Step 1: Fetch homepage ──────────────────────────────────────
             try:
                 res = await client.get(base)
                 main_html = res.text
             except Exception:
                 return {}
 
-            # ── Step 2: Try JSON-LD on homepage first ─────────────────────
             jsonld = _extract_jsonld_contacts(main_html)
             if jsonld["emails"] or jsonld["phones"]:
                 return {
@@ -278,7 +257,6 @@ async def _scrape_contact_info(website: str) -> dict:
                     "contact_url": None,
                 }
 
-            # ── Step 3: Scored link search for contact page ───────────────
             link_re = _re.compile(r'href=["\']([^"\'\s#][^"\']*)["\']', _re.IGNORECASE)
             all_links = link_re.findall(main_html)
 
@@ -286,19 +264,16 @@ async def _scrape_contact_info(website: str) -> dict:
             best_score = 0
             for href in all_links:
                 href_lower = href.lower()
-                # Skip anchors, mailto, tel, external social
                 if href_lower.startswith(("mailto:", "tel:", "javascript:")):
                     continue
                 score = 0
                 for i, kw in enumerate(_CONTACT_KWS):
                     if kw.lower() in href_lower:
-                        # Earlier keywords in the list get higher priority
                         score += max(5 - i, 1)
                 if score > best_score:
                     best_score = score
                     contact_url = _urljoin(base, href)
 
-            # ── Step 4: Fallback paths when no link discovered ────────────
             if not contact_url:
                 for suffix in _CONTACT_PATHS:
                     try:
@@ -309,14 +284,12 @@ async def _scrape_contact_info(website: str) -> dict:
                     except Exception:
                         pass
 
-            # ── Step 5: Fetch contact page ─────────────────────────────────
             target_html = main_html
             if contact_url:
                 try:
                     r = await client.get(contact_url, timeout=10)
                     if r.status_code == 200:
                         target_html = r.text
-                        # Try JSON-LD on contact page
                         jsonld = _extract_jsonld_contacts(r.text)
                         if jsonld["emails"] or jsonld["phones"]:
                             return {
@@ -327,7 +300,6 @@ async def _scrape_contact_info(website: str) -> dict:
                 except Exception:
                     pass
 
-            # ── Step 6: Regex extraction ───────────────────────────────────
             text = _strip_tags(target_html)
             emails = _find_emails(text)
             phones = _find_phones(text)
@@ -388,7 +360,6 @@ async def enrich_company(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
-    # Auto-update the lead (basic fields — only fill empty)
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if lead:
         if data.get("industry") and not lead.industry:
@@ -398,17 +369,14 @@ async def enrich_company(
         if data.get("company_size") and not lead.company_size:
             lead.company_size = data["company_size"]
 
-        # ── Use AI-suggested website if lead has none ──────────────────────
         ai_website = data.get("website")
         if ai_website and not lead.website:
-            # Basic sanity check before saving
             if isinstance(ai_website, str) and "." in ai_website:
                 if not ai_website.startswith("http"):
                     ai_website = f"https://{ai_website}"
                 lead.website = ai_website
                 data["ai_suggested_website"] = ai_website
 
-        # ── Scrape contact page for email / phone ──────────────────────────
         website_to_scrape = lead.website
         contact_info: dict = {}
         if website_to_scrape:
@@ -522,7 +490,6 @@ def check_gmail_replies(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gmail error: {str(e)}")
 
-    # Get all sent email addresses from leads
     leads = db.query(Lead).filter(
         Lead.assigned_to == current_user.id,
         Lead.email.isnot(None),
@@ -540,7 +507,6 @@ def check_gmail_replies(
             headers = {h["name"]: h["value"] for h in full_msg.get("payload", {}).get("headers", [])}
             from_email = headers.get("From", "").lower()
 
-            # Check if sender matches any lead email
             for email, lead in lead_emails.items():
                 if email in from_email:
                     if lead.status == LeadStatus.contacted:
@@ -569,7 +535,7 @@ class GenerateEmailRequest(BaseModel):
     website_url: str
     product: str
     lead_id: Optional[str] = None
-    tone: str = "professional"  # professional / friendly / urgent
+    tone: str = "professional"
 
 
 PRODUCT_DESCRIPTIONS = {
@@ -604,7 +570,6 @@ async def generate_email(
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
-    # 1. Fetch website
     website_summary = ""
     try:
         headers = {
@@ -651,7 +616,6 @@ BODY:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
-    # Parse subject + body
     subject = ""
     body_text = ""
     if "SUBJECT:" in text and "BODY:" in text:
@@ -674,9 +638,9 @@ BODY:
 
 class GenerateProposalRequest(BaseModel):
     lead_id: str
-    product: str  # 主推產品
+    product: str
     tone: str = "professional"
-    include_benchmark: bool = True  # 是否包含產業 benchmark
+    include_benchmark: bool = True
 
 
 @router.post("/generate-proposal")
@@ -685,11 +649,6 @@ async def generate_proposal(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    生成完整提案信：
-    1. 抓取 lead 的含金量分析結果（tech/ad signals）
-    2. 用 OpenAI 生成包含客戶現況分析 + 潮網服務建議的提案信
-    """
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
@@ -697,19 +656,16 @@ async def generate_proposal(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    # 整理客戶資訊
     tech = lead.tech_signals or {}
     ad = lead.ad_signals or {}
     score = lead.enriched_score or 0
 
-    # 分析現況
     has_gtm = tech.get("gtm", False)
     has_pixel = tech.get("meta_pixel", False)
     has_ga4 = tech.get("ga4", False)
     has_meta_ads = ad.get("meta", {}).get("has_ads", False)
     has_google_ads = ad.get("google_ads", {}).get("has_ads", False)
 
-    # 潮網產品對應說明
     PRODUCTS = {
         "廣告投放": "Meta/Google 廣告投放優化，提升 ROAS",
         "SEO優化": "搜尋引擎優化，提升自然流量",
@@ -719,7 +675,6 @@ async def generate_proposal(
         "程序化廣告": "Programmatic 廣告投放，精準鎖定受眾",
     }
     product_desc = PRODUCTS.get(body.product, body.product)
-
     tone_map = {"professional": "專業正式", "friendly": "親切友善", "urgent": "急迫有力"}
     tone_label = tone_map.get(body.tone, "專業正式")
 

@@ -11,6 +11,16 @@ const api = axios.create({
   withCredentials: true,
 })
 
+// Attach Bearer token from localStorage (fixes Safari cross-site cookie blocking)
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) {
+    config.headers = config.headers ?? {}
+    config.headers['Authorization'] = `Bearer ${token}`
+  }
+  return config
+})
+
 api.interceptors.response.use(
   (res) => res,
   (err) => {
@@ -120,6 +130,8 @@ export const importScraperJob = (jobId: string, assigned_to?: string, email_only
   api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
 export const findCompanyWebsite = (q: string) =>
   api.get(`/scraper/find-website`, { params: { q } })
+export const findCompanyPhone = (q: string, website?: string) =>
+  api.get(`/scraper/find-phone`, { params: { q, ...(website ? { website } : {}) } })
 export const updateScraperJobField = (jobId: string, index: number, field: string, value: string | null) =>
   api.patch(`/scraper/jobs/${jobId}/update-field`, { index, field, value })
 
@@ -351,3 +363,9 @@ export const generatePptxDownload = (lead_id: string, extra_context?: string, us
 
 export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[], client_type?: string) =>
   api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [], client_type: client_type || 'b2c' })
+
+// ── 名單審核 ──────────────────────────────────────────────────────────────────
+export const getLeadApprovals = () => api.get('/approvals/leads')
+export const getLeadApprovalCount = () => api.get('/approvals/leads/pending-count')
+export const reviewLeadApproval = (id: string, decision: 'approved' | 'rejected', note?: string) =>
+  api.post(`/approvals/leads/${id}/review`, { decision, note })

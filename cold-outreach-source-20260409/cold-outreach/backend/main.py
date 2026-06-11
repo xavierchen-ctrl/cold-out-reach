@@ -20,7 +20,7 @@ import models  # register all ORM models
 from routers import auth, leads, activities, gmail, ai, stats, scraper, scoring, bulk, sequences
 from routers import templates, email_scheduler, tracking, reports
 from routers import contacts, tags, attachments, ab_test, webhooks, notifications, analytics, keyword_tracker, weekly_report
-from routers import cadence, call_log, enrich, icp, signals, teams
+from routers import cadence, call_log, enrich, icp, signals, teams, approvals, proposal
 from routers import proposals
 
 
@@ -166,6 +166,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[migration] team_lead enum: {e}")
 
+    # Migration: add claiming / called_no_answer to leadstatus enum
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TYPE leadstatus ADD VALUE IF NOT EXISTS 'claiming'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] leadstatus claiming: {e}")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TYPE leadstatus ADD VALUE IF NOT EXISTS 'called_no_answer'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] leadstatus called_no_answer: {e}")
+
+    # Migration: clear assigned_to for all claiming leads (one-time fix)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE leads SET assigned_to = NULL WHERE status = 'claiming'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] clear claiming assigned_to: {e}")
+
     # Migration: create teams and assign user roles
     try:
         with engine.connect() as conn:
@@ -273,6 +295,8 @@ app.include_router(enrich.router)
 app.include_router(icp.router)
 app.include_router(signals.router)
 app.include_router(teams.router)
+app.include_router(approvals.router)
+app.include_router(proposal.router)
 app.include_router(proposals.router)
 
 

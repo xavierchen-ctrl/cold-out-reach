@@ -33,7 +33,7 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
         samesite="none" if _COOKIE_SECURE else "lax",
         secure=_COOKIE_SECURE,
     )
-    return {"message": "ok", "user": UserOut.model_validate(user)}
+    return {"message": "ok", "token": token, "user": UserOut.model_validate(user)}
 
 
 @router.post("/logout")

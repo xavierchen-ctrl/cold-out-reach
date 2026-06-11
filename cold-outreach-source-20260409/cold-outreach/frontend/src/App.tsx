@@ -18,6 +18,7 @@ import ReportsPage from '@/pages/ReportsPage'
 import ICPPage from '@/pages/ICPPage'
 import ScraperJobPage from '@/pages/ScraperJobPage'
 import ProposalsPage from '@/pages/ProposalsPage'
+import ProposalPage from '@/pages/ProposalPage'
 import Layout from '@/components/Layout'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -59,6 +60,7 @@ export default function App() {
           <Route path="icp" element={<ErrorBoundary><ICPPage /></ErrorBoundary>} />
           <Route path="scraper/:id" element={<ErrorBoundary><ScraperJobPage /></ErrorBoundary>} />
           <Route path="proposals" element={<ErrorBoundary><ProposalsPage /></ErrorBoundary>} />
+          <Route path="proposal" element={<ErrorBoundary><ProposalPage /></ErrorBoundary>} />
         </Route>
         <Route path="*" element={<Navigate to="/leads" replace />} />
       </Routes>

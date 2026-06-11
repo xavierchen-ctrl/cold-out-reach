@@ -7,6 +7,7 @@ import {
   scoreLead, scoreBatch, bulkStatus, bulkDelete, getSequences, enrollSequence, enrichLushaPhone, enrichLushaStatus,
   exportCsv, getUsers, getTags, addLeadTags, getICPs, batchAnalyzeSignals,
   getTemplates, bulkSendEmail,
+  getLeadApprovals, getLeadApprovalCount, reviewLeadApproval,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, ScraperJob, User, Tag, ICPProfile, EmailTemplate, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, SCRAPER_SOURCES, SCRAPER_DEFAULT_URLS, ACTIVITY_LABELS } from '@/types'
@@ -17,7 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Upload, Search, Trash2, Mail, Sparkles, RefreshCw, Download, Eye, Star, CheckSquare, LayoutGrid, Table2, SlidersHorizontal, Building2 } from 'lucide-react'
+import { Plus, Upload, Search, Trash2, Mail, Sparkles, RefreshCw, Download, Eye, Star, CheckSquare, LayoutGrid, Table2, SlidersHorizontal, Building2, Phone } from 'lucide-react'
 import KanbanView from '@/components/KanbanView'
 import AdvancedFilterSidebar, { FilterChips, FilterState, EMPTY_FILTER, applyFilter } from '@/components/AdvancedFilterSidebar'
 
@@ -27,21 +28,28 @@ function ScoreBadge({ score }: { score: number | null }) {
   return <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium ${color}`}>{score}</span>
 }
 
-// Tabs vary by role: sales cannot see scraper tab
-function getAvailableTabs(role?: string) {
-  if (role === 'sales') return ['手動管理', 'CSV 匯入'] as const
-  return ['手動管理', 'CSV 匯入', '會展爬取'] as const
+function isApprover(user?: { role?: string; name?: string } | null) {
+  return user?.role === 'team_lead' || user?.role === 'admin' || user?.role === 'manager'
 }
-type Tab = '手動管理' | 'CSV 匯入' | '會展爬取'
+
+// Tabs vary by role: sales cannot see scraper tab; approvers get 待審核 tab
+function getAvailableTabs(role?: string, approver?: boolean) {
+  const base = ['手動管理', 'CSV 匯入', '名單爬取']
+  if (approver) base.push('待審核')
+  return base as Tab[]
+}
+type Tab = '手動管理' | 'CSV 匯入' | '名單爬取' | '待審核'
 
 const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string][]
 const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
 
 // ── Status Badge ──────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: LeadStatus }) {
+function StatusBadge({ status }: { status: string }) {
+  const color = LEAD_STATUS_COLORS[status as LeadStatus] ?? 'bg-gray-100 text-gray-500'
+  const label = LEAD_STATUS_LABELS[status as LeadStatus] ?? status
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${LEAD_STATUS_COLORS[status]}`}>
-      {LEAD_STATUS_LABELS[status]}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
+      {label}
     </span>
   )
 }
@@ -321,19 +329,38 @@ function LeadDetail({
 
 // ── Create Lead Modal ─────────────────────────────────────────────────────────
 function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [form, setForm] = useState({ company_name: '', contact_name: '', title: '', email: '', phone: '', industry: '', city: '', source: '' })
+  const [form, setForm] = useState({ company_name: '', contact_name: '', title: '', email: '', phone: '', industry: '', city: '', department: '', source: '' })
   const [saving, setSaving] = useState(false)
+  const [pendingMsg, setPendingMsg] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSaving(true)
     try {
-      await createLead(form)
-      onCreated()
-      onClose()
+      const res = await createLead(form)
+      if (res.status === 202 && res.data?.pending_approval) {
+        setPendingMsg(res.data.message)
+      } else {
+        onCreated()
+        onClose()
+      }
     } finally {
       setSaving(false)
     }
+  }
+
+  if (pendingMsg) {
+    return (
+      <Dialog open onOpenChange={onClose}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>審核申請已送出</DialogTitle></DialogHeader>
+          <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-4 text-sm text-yellow-800">{pendingMsg}</div>
+          <div className="flex justify-end pt-2">
+            <Button onClick={onClose}>關閉</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    )
   }
 
   return (
@@ -353,6 +380,7 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
               { label: '電話', key: 'phone' },
               { label: '產業', key: 'industry' },
               { label: '城市', key: 'city' },
+              { label: '部門', key: 'department' },
             ].map(({ label, key }) => (
               <div key={key}>
                 <Label>{label}</Label>
@@ -371,6 +399,122 @@ function CreateLeadModal({ onClose, onCreated }: { onClose: () => void; onCreate
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+// ── Approval Tab ──────────────────────────────────────────────────────────────
+type ApprovalItem = {
+  id: string
+  submitted_by_name: string
+  submitted_at: string
+  conflict_company: string
+  lead_data: Record<string, unknown>
+  status: string
+  team_lead_decision: string | null
+  team_lead_reviewer_name: string | null
+  ivy_decision: string | null
+  ivy_reviewer_name: string | null
+  review_note: string | null
+  resolved_at: string | null
+}
+
+function ApprovalTab({ onResolved }: { onResolved: () => void }) {
+  const { user } = useAuth()
+  const [items, setItems] = useState<ApprovalItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [reviewingId, setReviewingId] = useState<string | null>(null)
+  const [note, setNote] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await getLeadApprovals()
+      setItems(Array.isArray(res.data) ? res.data : [])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const handleReview = async (id: string, decision: 'approved' | 'rejected') => {
+    setReviewingId(id)
+    try {
+      await reviewLeadApproval(id, decision, note || undefined)
+      setNote('')
+      await load()
+      onResolved()
+    } finally {
+      setReviewingId(null)
+    }
+  }
+
+  const decisionLabel = (d: string | null) => {
+    if (d === 'approved') return <span className="text-green-600 font-medium">核准</span>
+    if (d === 'rejected') return <span className="text-red-600 font-medium">拒絕</span>
+    return <span className="text-muted-foreground">待審</span>
+  }
+
+  if (loading) return <div className="py-12 text-center text-muted-foreground text-sm">載入中…</div>
+  if (items.length === 0) return <div className="py-12 text-center text-muted-foreground text-sm">目前沒有待審核的申請</div>
+
+  return (
+    <div className="space-y-4">
+      {items.map(item => {
+        const ld = item.lead_data
+        const isPending = item.status === 'pending'
+        return (
+          <div key={item.id} className={`rounded-lg border p-4 space-y-3 ${isPending ? 'border-yellow-300 bg-yellow-50/40' : 'border-border bg-muted/20'}`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full mb-1 ${item.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : item.status === 'approved' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {item.status === 'pending' ? '待審核' : item.status === 'approved' ? '已核准' : '已拒絕'}
+                </span>
+                <p className="font-medium">{item.conflict_company}</p>
+                <p className="text-xs text-muted-foreground">申請人：{item.submitted_by_name}　{new Date(item.submitted_at).toLocaleString('zh-TW')}</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-1 text-sm">
+              {(['contact_name', 'title', 'email', 'phone', 'department', 'industry', 'city'] as const).map(k => ld[k] ? (
+                <div key={k}><span className="text-muted-foreground text-xs">{k === 'contact_name' ? '聯絡人' : k === 'title' ? '職稱' : k === 'email' ? 'Email' : k === 'phone' ? '電話' : k === 'department' ? '部門' : k === 'industry' ? '產業' : '城市'}：</span>{String(ld[k])}</div>
+              ) : null)}
+            </div>
+
+            <div className="flex flex-wrap gap-4 text-sm">
+              <div>小組長：{decisionLabel(item.team_lead_decision)}{item.team_lead_reviewer_name ? ` (${item.team_lead_reviewer_name})` : ''}</div>
+              <div>Manager：{decisionLabel(item.ivy_decision)}{item.ivy_reviewer_name ? ` (${item.ivy_reviewer_name})` : ''}</div>
+              {item.review_note && <div className="text-muted-foreground">備註：{item.review_note}</div>}
+            </div>
+
+            {isPending && isApprover(user) && (
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  placeholder="備註（可選）"
+                  value={note}
+                  onChange={e => setNote(e.target.value)}
+                  className="h-8 text-sm max-w-xs"
+                />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-green-500 text-green-600 hover:bg-green-50"
+                  disabled={reviewingId === item.id}
+                  onClick={() => handleReview(item.id, 'approved')}
+                >核准</Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-red-400 text-red-600 hover:bg-red-50"
+                  disabled={reviewingId === item.id}
+                  onClick={() => handleReview(item.id, 'rejected')}
+                >拒絕</Button>
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -783,11 +927,12 @@ export default function LeadsPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { user } = useAuth()
-  const TABS = getAvailableTabs(user?.role)
+  const TABS = getAvailableTabs(user?.role, isApprover(user))
   const initTab = (searchParams.get('tab') as Tab | null)
   const [activeTab, setActiveTab] = useState<Tab>(
     initTab && (TABS as readonly string[]).includes(initTab) ? initTab : '手動管理'
   )
+  const [pendingCount, setPendingCount] = useState(0)
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -835,7 +980,10 @@ export default function LeadsPage() {
     getSequences().then(r => setSequences(Array.isArray(r.data) ? r.data : [])).catch(() => {})
     getUsers().then(r => setAllUsers(Array.isArray(r.data) ? r.data : [])).catch(() => {})
     getTags().then(r => setAllTags(Array.isArray(r.data) ? r.data : [])).catch(() => {})
-  }, [])
+    if (isApprover(user)) {
+      getLeadApprovalCount().then(r => setPendingCount(r.data?.count ?? 0)).catch(() => {})
+    }
+  }, [user])
 
   const handleDelete = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -963,9 +1111,14 @@ export default function LeadsPage() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px flex items-center gap-1.5 ${activeTab === tab ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}
           >
             {tab}
+            {tab === '待審核' && pendingCount > 0 && (
+              <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold leading-none">
+                {pendingCount > 9 ? '9+' : pendingCount}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -1153,11 +1306,13 @@ export default function LeadsPage() {
             <>
               {/* 手機版：card list */}
               <div className="lg:hidden space-y-3 mt-4">
-                {filteredLeads.map(lead => (
+                {filteredLeads.map(lead => {
+                  const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
+                  return (
                   <div
                     key={lead.id}
-                    className="bg-white rounded-lg border p-4 shadow-sm cursor-pointer active:bg-gray-50"
-                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    className={`bg-white rounded-lg border p-4 shadow-sm ${canAccess ? 'cursor-pointer active:bg-gray-50' : 'cursor-default opacity-80'}`}
+                    onClick={() => { if (canAccess) navigate(`/leads/${lead.id}`) }}
                   >
                     <div className="flex justify-between items-start">
                       <div className="min-w-0 flex-1 mr-2">
@@ -1185,7 +1340,10 @@ export default function LeadsPage() {
                       </div>
                     )}
                     <div className="mt-2 flex items-center justify-between">
-                      <ScoreBadge score={lead.score} />
+                      <div className="flex items-center gap-2">
+                        <ScoreBadge score={lead.score} />
+                        {!canAccess && <span className="text-xs text-gray-400">🔒</span>}
+                      </div>
                       {user?.role !== 'sales' && (
                         <button
                           onClick={e => handleDelete(lead.id, e)}
@@ -1196,7 +1354,8 @@ export default function LeadsPage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
                 <div className="text-center text-xs text-muted-foreground py-2">
                   共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
                 </div>
@@ -1214,7 +1373,9 @@ export default function LeadsPage() {
                         <th className="px-4 py-3 text-left font-medium">公司</th>
                         <th className="px-4 py-3 text-left font-medium">聯絡人</th>
                         <th className="px-4 py-3 text-left font-medium">Email</th>
+                        <th className="px-4 py-3 text-left font-medium">電話</th>
                         <th className="px-4 py-3 text-left font-medium">官網</th>
+                        <th className="px-4 py-3 text-left font-medium">接洽人</th>
                         <th className="px-4 py-3 text-left font-medium">狀態</th>
                         <th className="px-4 py-3 text-left font-medium">評分</th>
                         <th className="px-4 py-3 text-left font-medium cursor-pointer hover:text-primary" title="點擊依熱度排序">熱度 🔥</th>
@@ -1224,21 +1385,40 @@ export default function LeadsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {filteredLeads.map(lead => (
+                      {filteredLeads.map(lead => {
+                        const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
+                        return (
                         <tr
                           key={lead.id}
-                          className={`hover:bg-muted/30 cursor-pointer transition-colors ${checked.has(lead.id) ? 'bg-indigo-50' : ''}`}
-                          onClick={() => navigate(`/leads/${lead.id}`)}
+                          className={`transition-colors ${canAccess ? 'hover:bg-muted/30 cursor-pointer' : 'cursor-default opacity-80'} ${checked.has(lead.id) ? 'bg-indigo-50' : ''}`}
+                          onClick={() => { if (canAccess) navigate(`/leads/${lead.id}`) }}
                         >
                           <td className="px-3 py-3" onClick={e => toggleCheck(lead.id, e)}>
                             <input type="checkbox" checked={checked.has(lead.id)} onChange={() => {}} className="rounded" />
                           </td>
-                          <td className="px-4 py-3 font-medium">{lead.company_name}</td>
+                          <td className="px-4 py-3 font-medium">
+                            {lead.company_name}
+                            {!canAccess && <span className="ml-1 text-xs text-gray-400">🔒</span>}
+                          </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {lead.contact_name || '—'}
                             {lead.title && <span className="text-xs ml-1">({lead.title})</span>}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{lead.email || '—'}</td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            {lead.phone ? (
+                              <a
+                                href={`tel:${lead.phone}`}
+                                className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded w-fit transition-colors"
+                                title={`撥打 ${lead.phone}`}
+                              >
+                                <Phone className="w-3 h-3 shrink-0" />
+                                {lead.phone}
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                             {lead.website ? (
                               <a
@@ -1251,6 +1431,9 @@ export default function LeadsPage() {
                                 {lead.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
                               </a>
                             ) : <span className="text-xs text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {lead.assigned_user?.name || <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-4 py-3"><StatusBadge status={lead.status} /></td>
                           <td className="px-4 py-3"><ScoreBadge score={lead.score} /></td>
@@ -1288,7 +1471,8 @@ export default function LeadsPage() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                   <div className="px-4 py-2 border-t text-xs text-muted-foreground">
@@ -1303,7 +1487,8 @@ export default function LeadsPage() {
       )}
 
       {activeTab === 'CSV 匯入' && <CsvImportTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
-      {activeTab === '會展爬取' && <ScraperTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
+      {activeTab === '名單爬取' && <ScraperTab onImported={() => { loadLeads(); setActiveTab('手動管理'); }} />}
+      {activeTab === '待審核' && <ApprovalTab onResolved={() => { loadLeads(); getLeadApprovalCount().then(r => setPendingCount(r.data?.count ?? 0)).catch(() => {}) }} />}
 
       {/* Create modal */}
       {showCreate && (

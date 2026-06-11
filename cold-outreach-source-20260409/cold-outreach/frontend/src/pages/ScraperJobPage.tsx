@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob, findCompanyWebsite, updateScraperJobField } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2 } from 'lucide-react'
 
@@ -30,6 +30,7 @@ export default function ScraperJobPage() {
   const [error, setError] = useState('')
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [findingWebsite, setFindingWebsite] = useState<Set<number>>(new Set())
+  const [findingPhone, setFindingPhone] = useState<Set<number>>(new Set())
 
   useEffect(() => {
     if (!id) return
@@ -86,6 +87,24 @@ export default function ScraperJobPage() {
     }
   }
 
+  const handleFindPhone = async (idx: number, companyName: string) => {
+    setFindingPhone(prev => new Set(prev).add(idx))
+    try {
+      const res = await findCompanyPhone(companyName, companies[idx]?.website)
+      const phone: string | null = res.data.phone
+      if (phone) {
+        setCompanies(prev => prev.map((c, i) => i === idx ? { ...c, phone } : c))
+        if (id) await updateScraperJobField(id, idx, 'phone', phone)
+      } else {
+        alert(`找不到「${companyName}」的電話`)
+      }
+    } catch {
+      alert('搜尋失敗，請稍後再試')
+    } finally {
+      setFindingPhone(prev => { const s = new Set(prev); s.delete(idx); return s })
+    }
+  }
+
   const handleImport = async () => {
     if (!id) return
     setImporting(true)
@@ -113,7 +132,7 @@ export default function ScraperJobPage() {
       {/* Header */}
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between sticky top-0 z-10">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => navigate('/leads?tab=會展爬取')}>
+          <Button variant="ghost" size="icon" onClick={() => navigate('/leads?tab=名單爬取')}>
             <ArrowLeft className="w-5 h-5 text-gray-600" />
           </Button>
           <div>
@@ -301,13 +320,23 @@ export default function ScraperJobPage() {
                           </div>
                         </td>
 
-                        <td className="py-2 px-4 hidden lg:table-cell">
+                        <td className="py-2 px-4 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
                           {c.phone ? (
                             <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
                               <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
                             </div>
+                          ) : findingPhone.has(idx) ? (
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                              <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
+                            </span>
                           ) : (
-                            <span className="text-xs text-gray-300">—</span>
+                            <button
+                              onClick={() => handleFindPhone(idx, c.company_name)}
+                              className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                              title="自動搜尋電話並帶入"
+                            >
+                              <Search className="w-3 h-3" /> 查找電話
+                            </button>
                           )}
                         </td>
 

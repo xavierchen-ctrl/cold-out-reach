@@ -18,7 +18,9 @@ class UserRole(str, enum.Enum):
 
 class LeadStatus(str, enum.Enum):
     new = "new"
+    claiming = "claiming"
     contacted = "contacted"
+    called_no_answer = "called_no_answer"
     replied = "replied"
     meeting_scheduled = "meeting_scheduled"
     mql = "mql"
@@ -115,6 +117,33 @@ class Lead(Base):
     contacts = relationship("Contact", back_populates="lead", cascade="all, delete-orphan")
     lead_tags = relationship("LeadTag", back_populates="lead", cascade="all, delete-orphan")
     attachments = relationship("Attachment", back_populates="lead", cascade="all, delete-orphan")
+
+
+class PendingLeadApproval(Base):
+    """同公司不同部門新增名單時，需小組長與 Ivy 張雙人審核才能建立。"""
+    __tablename__ = "pending_lead_approvals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = Column(DateTime, default=now_tw)
+    lead_data = Column(JSON, nullable=False)               # 送審的 LeadCreate payload
+    conflict_company = Column(String(255), nullable=False) # 觸發衝突的公司名
+    conflict_lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")  # pending/approved/rejected
+
+    # 小組長審核
+    team_lead_decision = Column(String(20), nullable=True)   # approved / rejected
+    team_lead_reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    # Ivy 張審核
+    ivy_decision = Column(String(20), nullable=True)
+    ivy_reviewer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    review_note = Column(Text, nullable=True)
+    resolved_at = Column(DateTime, nullable=True)
+
+    submitter = relationship("User", foreign_keys=[submitted_by])
+    team_lead_reviewer = relationship("User", foreign_keys=[team_lead_reviewer_id])
+    ivy_reviewer = relationship("User", foreign_keys=[ivy_reviewer_id])
 
 
 class LeadActivity(Base):

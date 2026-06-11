@@ -99,11 +99,10 @@ function SortableCard({ lead, onClick }: { lead: Lead; onClick: () => void }) {
 
 const COLUMN_COLORS: Record<LeadStatus, string> = {
   new: 'border-t-gray-400',
+  claiming: 'border-t-sky-400',
   contacted: 'border-t-blue-400',
+  called_no_answer: 'border-t-amber-400',
   replied: 'border-t-yellow-400',
-  meeting_scheduled: 'border-t-purple-400',
-  mql: 'border-t-orange-400',
-  sql: 'border-t-indigo-400',
   closed_won: 'border-t-emerald-500',
   closed_lost: 'border-t-rose-500',
   won: 'border-t-green-400',
