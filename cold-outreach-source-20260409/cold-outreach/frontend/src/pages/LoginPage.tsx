@@ -21,7 +21,9 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      const res = await login(email, password)
+      const token = res.data?.token
+      if (token) localStorage.setItem('access_token', token)
       await refresh()
       navigate('/leads')
     } catch (err: unknown) {
