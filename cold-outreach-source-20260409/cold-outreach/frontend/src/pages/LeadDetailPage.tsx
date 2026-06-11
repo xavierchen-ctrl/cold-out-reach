@@ -199,8 +199,9 @@ export default function LeadDetailPage() {
     setSaving(true)
     try {
       const payload: Record<string, unknown> = { ...(form as Record<string, unknown>) }
-      // Auto-advance: claiming → contacted when a note was added during this session
-      if (hasAddedNote && (lead?.status === 'claiming' || form.status === 'claiming')) {
+      // Auto-advance: claiming → contacted when at least one call note exists (any session)
+      const hasCallNote = activities.some(a => a.type === 'call_note')
+      if ((lead?.status === 'claiming' || form.status === 'claiming') && hasCallNote) {
         payload.status = 'contacted'
         payload.assigned_to = user?.id
       }
@@ -1090,7 +1091,7 @@ export default function LeadDetailPage() {
                 📵 已撥打未接
               </Button>
               <Button onClick={save} disabled={saving}>
-                {saving ? '儲存中...' : hasAddedNote && (lead?.status === 'claiming' || form.status === 'claiming') ? '儲存並標記已聯繫' : '儲存變更'}
+                {saving ? '儲存中...' : (lead?.status === 'claiming' || form.status === 'claiming') && activities.some(a => a.type === 'call_note') ? '儲存並標記已聯繫' : '儲存變更'}
               </Button>
             </div>
           </div>
