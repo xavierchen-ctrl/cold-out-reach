@@ -18,7 +18,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Plus, Upload, Search, Trash2, Mail, Sparkles, RefreshCw, Download, Eye, Star, CheckSquare, LayoutGrid, Table2, SlidersHorizontal, Building2 } from 'lucide-react'
+import { Plus, Upload, Search, Trash2, Mail, Sparkles, RefreshCw, Download, Eye, Star, CheckSquare, LayoutGrid, Table2, SlidersHorizontal, Building2, Phone } from 'lucide-react'
 import KanbanView from '@/components/KanbanView'
 import AdvancedFilterSidebar, { FilterChips, FilterState, EMPTY_FILTER, applyFilter } from '@/components/AdvancedFilterSidebar'
 
@@ -1365,6 +1365,7 @@ export default function LeadsPage() {
                         <th className="px-4 py-3 text-left font-medium">公司</th>
                         <th className="px-4 py-3 text-left font-medium">聯絡人</th>
                         <th className="px-4 py-3 text-left font-medium">Email</th>
+                        <th className="px-4 py-3 text-left font-medium">電話</th>
                         <th className="px-4 py-3 text-left font-medium">官網</th>
                         <th className="px-4 py-3 text-left font-medium">狀態</th>
                         <th className="px-4 py-3 text-left font-medium">評分</th>
@@ -1390,6 +1391,20 @@ export default function LeadsPage() {
                             {lead.title && <span className="text-xs ml-1">({lead.title})</span>}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground">{lead.email || '—'}</td>
+                          <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                            {lead.phone ? (
+                              <a
+                                href={`tel:${lead.phone}`}
+                                className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded w-fit transition-colors"
+                                title={`撥打 ${lead.phone}`}
+                              >
+                                <Phone className="w-3 h-3 shrink-0" />
+                                {lead.phone}
+                              </a>
+                            ) : (
+                              <span className="text-xs text-gray-300">—</span>
+                            )}
+                          </td>
                           <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                             {lead.website ? (
                               <a
