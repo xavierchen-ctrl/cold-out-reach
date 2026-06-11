@@ -104,7 +104,7 @@ def create_lead(
                     "approval_id": str(approval.id),
                     "message": (
                         f"「{body.company_name}」已有名單（部門：{existing_dept_display}），"
-                        f"新增部門「{new_dept_display}」需送請小組長及 Ivy 張審核，"
+                        f"新增部門「{new_dept_display}」需送請小組長及 Ivy 審核，"
                         "核准後才會正式建立。"
                     ),
                 },
