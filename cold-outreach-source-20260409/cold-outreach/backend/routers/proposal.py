@@ -2,16 +2,31 @@ import io
 import json
 import os
 import re
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from openai import OpenAI
+from sqlalchemy.orm import Session
 from auth import get_current_user
-from models import User
+from database import get_db
+from models import User, Lead
 
 router = APIRouter(prefix="/api/proposal", tags=["proposal"])
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    )
+}
+
+
+def _strip_tags(html: str) -> str:
+    text = re.sub(r'<[^>]+>', ' ', html)
+    return re.sub(r'\s+', ' ', text).strip()
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 C_NAVY   = (0x1B, 0x3A, 0x6B)
@@ -62,6 +77,108 @@ async def generate_proposal(
         raise HTTPException(status_code=500, detail=f"PPTX 建立失敗：{str(e)}")
 
     filename = f"{body.client_name}_{body.year}_媒體提案.pptx"
+    return StreamingResponse(
+        io.BytesIO(pptx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+class GenerateFromLeadRequest(BaseModel):
+    lead_id: str
+    services: List[str] = ["廣告投放", "SEO優化"]
+    budget_range: str = "50-100萬/月"
+    client_type: str = "b2c"
+    extra_context: str = ""
+    year: int = 2026
+
+
+_BUDGET_MAP = {
+    "10-30萬/月": "30",
+    "30-50萬/月": "50",
+    "50-100萬/月": "100",
+    "100萬以上/月": "150",
+}
+
+
+@router.post("/generate-from-lead")
+async def generate_from_lead(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    # Scrape website for context
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers=_HTTP_HEADERS) as client:
+                res = await client.get(url)
+                website_summary = _strip_tags(res.text)[:2000]
+        except Exception:
+            pass
+
+    # Build current_situation from enriched lead data
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+    score = lead.enriched_score or 0
+
+    parts = []
+    if lead.industry:
+        parts.append(f"產業類別：{lead.industry}")
+    if lead.company_size:
+        parts.append(f"公司規模：{lead.company_size}")
+    if lead.city:
+        parts.append(f"所在城市：{lead.city}")
+    if tech_str:
+        parts.append(f"已使用數位追蹤工具：{tech_str}")
+    if ad_str:
+        parts.append(f"目前廣告投放：{ad_str}")
+    if score:
+        parts.append(f"含金量評分：{score}/100")
+    if website_summary:
+        parts.append(f"官網內容：{website_summary}")
+    if body.extra_context.strip():
+        parts.append(f"補充說明：{body.extra_context.strip()}")
+
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    proposal_req = ProposalRequest(
+        client_name=lead.company_name,
+        industry=lead.industry or "未知",
+        current_situation=current_situation,
+        services=body.services,
+        monthly_budget=monthly_budget,
+        special_notes=None,
+        year=body.year,
+        client_type=body.client_type,
+    )
+
+    try:
+        if proposal_req.client_type == "b2b_biotech":
+            content = await _generate_content_b2b_biotech(proposal_req)
+        else:
+            content = await _generate_content_b2c(proposal_req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+
+    try:
+        pptx_bytes = _build_pptx(content, proposal_req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PPTX 建立失敗：{str(e)}")
+
+    filename = f"{lead.company_name}_{body.year}_媒體提案.pptx"
     return StreamingResponse(
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",

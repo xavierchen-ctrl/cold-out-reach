@@ -364,6 +364,16 @@ export const generatePptxDownload = (lead_id: string, extra_context?: string, us
 export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[], client_type?: string) =>
   api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [], client_type: client_type || 'b2c' })
 
+// ── 從名單生成提案 PPTX（python-pptx 16頁設計版）────────────────────────────────
+export const generateProposalFromLead = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  client_type: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/generate-from-lead', data, { responseType: 'blob' })
+
 // ── 名單審核 ──────────────────────────────────────────────────────────────────
 export const getLeadApprovals = () => api.get('/approvals/leads')
 export const getLeadApprovalCount = () => api.get('/approvals/leads/pending-count')

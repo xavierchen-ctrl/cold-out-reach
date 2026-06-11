@@ -2,9 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  uploadPptxTemplate, generatePptxContent,
+  generateProposalFromLead,
 } from '@/lib/api'
-import { generatePptxBlob } from '@/lib/pptxGenerator'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -278,15 +277,15 @@ function GenerateDialog({
   const [leads, setLeads] = useState<Lead[]>([])
   const [form, setForm] = useState({
     lead_id: '',
-    product_focus: '廣告投放',
+    services: ['廣告投放', 'SEO優化'],
     budget_range: '50-100萬/月',
+    client_type: 'b2c',
     extra_context: '',
+    year: new Date().getFullYear() + 1,
   })
   const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [uploadingTemplate, setUploadingTemplate] = useState(false)
-  const [templateInfo, setTemplateInfo] = useState('')
   const [downloadingPptx, setDownloadingPptx] = useState(false)
 
   useEffect(() => {
@@ -300,7 +299,7 @@ function GenerateDialog({
     l.company_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const busy = generating || uploadingTemplate || downloadingPptx
+  const busy = generating || downloadingPptx
 
   const handleContextFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     Array.from(e.target.files || []).forEach(file => {
@@ -315,48 +314,39 @@ function GenerateDialog({
     e.target.value = ''
   }
 
-  const handleUploadTemplate = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-    setUploadingTemplate(true)
-    setTemplateInfo('')
-    try {
-      const res = await uploadPptxTemplate(file)
-      setTemplateInfo(res.data.message)
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`上傳失敗：${msg || String(err)}`)
-    } finally {
-      setUploadingTemplate(false)
-      e.target.value = ''
-    }
-  }
-
   const handleDownloadPptx = async () => {
     if (!form.lead_id) return
     setDownloadingPptx(true)
     try {
-      // Append text-file contents to extra_context
-      let fullContext = form.extra_context
+      let extraContext = form.extra_context
       for (const cf of contextFiles.filter(cf => !cf.preview)) {
         const text = await cf.file.text()
-        fullContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
+        extraContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
       }
-      // Collect image data URLs for vision
-      const contextImages = contextFiles.filter(cf => cf.preview).map(cf => cf.preview!)
 
-      const res = await generatePptxContent(form.lead_id, fullContext, contextImages)
-      const data = res.data
-      const blob = await generatePptxBlob(data)
-      const url = window.URL.createObjectURL(blob)
+      const res = await generateProposalFromLead({
+        lead_id: form.lead_id,
+        services: form.services,
+        budget_range: form.budget_range,
+        client_type: form.client_type,
+        extra_context: extraContext,
+        year: form.year,
+      })
+      const url = window.URL.createObjectURL(new Blob([res.data]))
       const a = document.createElement('a')
       a.href = url
-      a.download = `${data.company_name}_提案簡報.pptx`
+      const selectedLead = leads.find(l => l.id === form.lead_id)
+      a.download = `${selectedLead?.company_name || '提案'}_${form.year}_媒體提案.pptx`
       a.click()
       window.URL.revokeObjectURL(url)
     } catch (err: unknown) {
-      const detail = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      alert(`下載失敗：${detail || String(err)}`)
+      const text = await (err as { response?: { data?: Blob } })?.response?.data?.text?.()
+      try {
+        const json = JSON.parse(text || '{}')
+        alert(`下載失敗：${json.detail || String(err)}`)
+      } catch {
+        alert(`下載失敗，請稍後再試`)
+      }
     } finally {
       setDownloadingPptx(false)
     }
@@ -392,16 +382,55 @@ function GenerateDialog({
             </Select>
           </div>
 
-          {/* 服務 + 預算 */}
-          <div className="grid grid-cols-2 gap-3">
+          {/* 客戶類型 */}
+          <div>
+            <Label>客戶類型</Label>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              {[
+                { value: 'b2c', label: 'B2C 消費者品牌' },
+                { value: 'b2b_biotech', label: 'B2B 生技製藥' },
+              ].map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setForm(f => ({ ...f, client_type: opt.value }))}
+                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    form.client_type === opt.value
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 服務（多選）+ 預算 */}
+          <div className="space-y-3">
             <div>
-              <Label>主推服務</Label>
-              <Select value={form.product_focus} onValueChange={v => setForm(f => ({ ...f, product_focus: v }))}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {PRODUCT_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <Label>主推服務（可多選）</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {PRODUCT_OPTIONS.map(o => (
+                  <button
+                    key={o}
+                    type="button"
+                    onClick={() => setForm(f => ({
+                      ...f,
+                      services: f.services.includes(o)
+                        ? f.services.filter(s => s !== o)
+                        : [...f.services, o],
+                    }))}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      form.services.includes(o)
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    }`}
+                  >
+                    {o}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <Label>預算規模</Label>
@@ -475,35 +504,13 @@ function GenerateDialog({
             )}
           </div>
 
-          {/* PPTX 設計模板 */}
-          <div className="p-3 bg-slate-50 border rounded-lg space-y-2">
-            <p className="text-xs font-medium text-slate-700">PPTX 設計模板（選填）</p>
-            <p className="text-xs text-muted-foreground">上傳你的 PPTX 設計檔，AI 會將提案內容套入你的版面後供下載</p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs"
-                disabled={uploadingTemplate}
-                onClick={() => document.getElementById('pptx-tpl-input')?.click()}
-                type="button"
-              >
-                {uploadingTemplate
-                  ? <><Loader2 className="w-3 h-3 mr-1 animate-spin" />上傳中...</>
-                  : <><Upload className="w-3 h-3 mr-1" />選擇 .pptx 檔案</>}
-              </Button>
-              {templateInfo && <span className="text-xs text-green-600">✓ {templateInfo}</span>}
-            </div>
-            <input id="pptx-tpl-input" type="file" accept=".pptx" className="hidden" onChange={handleUploadTemplate} />
-          </div>
-
           {/* 操作按鈕 */}
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
-            <Button onClick={handleDownloadPptx} disabled={!form.lead_id || busy}>
+            <Button onClick={handleDownloadPptx} disabled={!form.lead_id || form.services.length === 0 || busy}>
               {downloadingPptx
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />生成中...</>
-                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX</>}
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />AI 生成中，約需 30 秒...</>
+                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（16頁）</>}
             </Button>
           </div>
         </div>
