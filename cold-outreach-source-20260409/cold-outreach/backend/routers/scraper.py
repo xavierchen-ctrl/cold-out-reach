@@ -334,7 +334,7 @@ async def find_phone_for_company(
         r'(?<!\d)'
         r'('
         r'0800[-\s]?\d{3}[-\s]?\d{3}'
-        r'|0[2-9]\d[-\s]?\d{3,4}[-\s]?\d{4}'
+        r'|0[2-9]\d?[-\s]?\d{3,4}[-\s]?\d{4}'   # 市話：02/04 + 8碼，或 049 + 7碼
         r'|09\d{2}[-\s]?\d{3}[-\s]?\d{3}'
         r'|\(\d{2}\)\s*\d{3,4}[-\s]\d{4}'
         r')'
@@ -365,10 +365,6 @@ async def find_phone_for_company(
                 m = _TW_PHONE.search(raw)
                 if m:
                     return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
-                # Gemini 直接回傳乾淨的電話字串
-                cleaned = _re.sub(r'[^\d\-\(\)\+]', '', raw)
-                if len(cleaned) >= 8:
-                    return {"phone": raw.strip()}
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
