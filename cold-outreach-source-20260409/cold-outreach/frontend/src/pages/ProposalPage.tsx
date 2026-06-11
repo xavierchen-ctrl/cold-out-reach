@@ -6,10 +6,20 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { FileDown, Loader2, Presentation } from 'lucide-react'
 
-const SERVICES = ['廣告投放', 'SEO優化', '社群代操', 'KOL行銷', 'LINE CRM', 'YouTube 影音', '整合行銷']
+const SERVICES_B2C = ['廣告投放', 'SEO優化', '社群代操', 'KOL行銷', 'LINE CRM', 'YouTube 影音', '整合行銷']
+const SERVICES_B2B_BIOTECH = ['LinkedIn ABM廣告', '生技媒體公關', 'Google Search/SEO', '會展行銷', '思想領導力內容', 'Geo-fencing廣告']
 const BUDGETS = ['50萬以下', '50', '100', '150', '200', '300', '500']
 
+type ClientType = 'b2c' | 'b2b' | 'b2b_biotech'
+
+const CLIENT_TYPE_OPTIONS: { value: ClientType; label: string; desc: string }[] = [
+  { value: 'b2c', label: 'B2C 消費者品牌', desc: '保健食品、電商、零售' },
+  { value: 'b2b', label: 'B2B 企業服務', desc: 'SaaS、製造業、整合服務' },
+  { value: 'b2b_biotech', label: 'B2B 生技製藥', desc: '生技新創、藥廠、醫療器材' },
+]
+
 export default function ProposalPage() {
+  const [clientType, setClientType] = useState<ClientType>('b2c')
   const [form, setForm] = useState({
     client_name: '',
     industry: '',
@@ -22,6 +32,19 @@ export default function ProposalPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [done, setDone] = useState(false)
+
+  const handleClientTypeChange = (type: ClientType) => {
+    setClientType(type)
+    // Reset services when switching to/from biotech
+    if (type === 'b2b_biotech') {
+      setServices(['LinkedIn ABM廣告', 'Google Search/SEO'])
+    } else {
+      setServices(['廣告投放', 'SEO優化'])
+    }
+  }
+
+  const currentServices = clientType === 'b2b_biotech' ? SERVICES_B2B_BIOTECH : SERVICES_B2C
+  const budgetLabel = clientType === 'b2b_biotech' ? '年度預算（萬）' : '月預算（萬）'
 
   const toggleService = (s: string) =>
     setServices(prev => prev.includes(s) ? prev.filter(x => x !== s) : [...prev, s])
@@ -42,7 +65,7 @@ export default function ProposalPage() {
     try {
       const res = await api.post(
         '/proposal/generate',
-        { ...form, services },
+        { ...form, services, client_type: clientType },
         { responseType: 'blob' }
       )
       const url = URL.createObjectURL(new Blob([res.data]))
@@ -76,6 +99,29 @@ export default function ProposalPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+
+        {/* Client Type Selector */}
+        <div className="bg-white border rounded-xl p-5 space-y-3">
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">客戶類型</h2>
+          <div className="grid grid-cols-3 gap-3">
+            {CLIENT_TYPE_OPTIONS.map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => handleClientTypeChange(opt.value)}
+                className={`flex flex-col items-start px-3 py-3 rounded-lg border text-left transition-colors ${
+                  clientType === opt.value
+                    ? 'bg-primary/10 border-primary text-primary'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                }`}
+              >
+                <span className="font-semibold text-sm leading-snug">{opt.label}</span>
+                <span className="text-xs text-muted-foreground mt-0.5 leading-tight">{opt.desc}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Basic info */}
         <div className="bg-white border rounded-xl p-5 space-y-4">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">客戶基本資訊</h2>
@@ -91,17 +137,21 @@ export default function ProposalPage() {
             <div className="space-y-1.5">
               <Label>產業 *</Label>
               <Input
-                placeholder="例：保健食品、電商、教育"
+                placeholder={clientType === 'b2b_biotech' ? '例：生技新創、CRO、藥廠' : '例：保健食品、電商、教育'}
                 value={form.industry}
                 onChange={e => setForm(f => ({ ...f, industry: e.target.value }))}
               />
             </div>
           </div>
           <div className="space-y-1.5">
-            <Label>品牌現況說明 *</Label>
+            <Label>{clientType === 'b2b_biotech' ? '公司現況說明 *' : '品牌現況說明 *'}</Label>
             <Textarea
               rows={4}
-              placeholder="說明客戶目前的品牌狀況、主要商品、遇到的問題、目前行銷方式等（越詳細 AI 生成越精準）"
+              placeholder={
+                clientType === 'b2b_biotech'
+                  ? '說明技術平台、目標合作夥伴、現有客戶、市場進入策略等（越詳細 AI 生成越精準）'
+                  : '說明客戶目前的品牌狀況、主要商品、遇到的問題、目前行銷方式等（越詳細 AI 生成越精準）'
+              }
               value={form.current_situation}
               onChange={e => setForm(f => ({ ...f, current_situation: e.target.value }))}
             />
@@ -112,7 +162,7 @@ export default function ProposalPage() {
         <div className="bg-white border rounded-xl p-5 space-y-3">
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">主推服務（可多選）</h2>
           <div className="flex flex-wrap gap-2">
-            {SERVICES.map(s => (
+            {currentServices.map(s => (
               <button
                 key={s}
                 type="button"
@@ -134,7 +184,7 @@ export default function ProposalPage() {
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">預算與年度</h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label>月預算（萬）</Label>
+              <Label>{budgetLabel}</Label>
               <select
                 className="w-full border rounded-md px-3 py-2 text-sm bg-white"
                 value={form.monthly_budget}
@@ -157,7 +207,7 @@ export default function ProposalPage() {
           <div className="space-y-1.5">
             <Label>特殊需求或備注（選填）</Label>
             <Input
-              placeholder="例：重點強調 LINE CRM、不含 YouTube 策略..."
+              placeholder="例：重點強調 LinkedIn 策略、需包含 FDA 法規行銷..."
               value={form.special_notes}
               onChange={e => setForm(f => ({ ...f, special_notes: e.target.value }))}
             />
