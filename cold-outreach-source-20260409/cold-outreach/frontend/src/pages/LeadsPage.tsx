@@ -44,10 +44,12 @@ const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string
 const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
 
 // ── Status Badge ──────────────────────────────────────────────────────────────
-function StatusBadge({ status }: { status: LeadStatus }) {
+function StatusBadge({ status }: { status: string }) {
+  const color = LEAD_STATUS_COLORS[status as LeadStatus] ?? 'bg-gray-100 text-gray-500'
+  const label = LEAD_STATUS_LABELS[status as LeadStatus] ?? status
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${LEAD_STATUS_COLORS[status]}`}>
-      {LEAD_STATUS_LABELS[status]}
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${color}`}>
+      {label}
     </span>
   )
 }
