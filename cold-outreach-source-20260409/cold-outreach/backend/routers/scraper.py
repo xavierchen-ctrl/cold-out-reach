@@ -201,6 +201,27 @@ def _is_good_url(url: str) -> bool:
     return bool(domain) and not any(bl in domain for bl in _WEBSITE_BLACKLIST)
 
 
+_TW_AREA3_SET = {'037', '038', '039', '049', '055', '056', '082', '083', '089'}
+_TW_AREA2_7DIGIT = {'05', '06', '07', '08'}  # 2-digit area codes with 7-digit locals
+
+
+def _fmt_phone_digits(digits: str) -> str:
+    """將純數字字串（已開頭0，長度8-10）格式化為帶連字號的台灣電話"""
+    if digits.startswith('09') and len(digits) == 10:
+        return f"{digits[:4]}-{digits[4:7]}-{digits[7:]}"
+    if len(digits) == 10:
+        return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
+    if len(digits) == 9:
+        a3 = digits[:3]
+        a2 = digits[:2]
+        if a3 in _TW_AREA3_SET:
+            return f"{a3}-{digits[3:6]}-{digits[6:]}"
+        if a2 in _TW_AREA2_7DIGIT:
+            return f"{a2}-{digits[2:5]}-{digits[5:]}"
+        return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+    return digits
+
+
 async def _search_ddg(client, query: str) -> _Opt[str]:
     """DuckDuckGo HTML 搜尋，回傳第一個合法網址"""
     resp = await client.get(
@@ -233,6 +254,24 @@ async def _search_bing(client, query: str) -> _Opt[str]:
         url = a.get("href", "")
         if _is_good_url(url):
             return url
+    return None
+
+
+async def _search_google(client, query: str) -> _Opt[str]:
+    """Google 搜尋備援，解析 /url?q= 重定向連結取得第一個合法官網"""
+    import re as _re_g
+    try:
+        resp = await client.get(
+            f"https://www.google.com/search?q={_urlparse.quote(query)}&hl=zh-TW&gl=tw&num=10",
+            timeout=12,
+        )
+        # Google encodes organic result links as /url?q=https://...&sa=...
+        for m in _re_g.finditer(r'/url\?q=(https?://[^&"\']+)', resp.text):
+            url = _urlparse.unquote(m.group(1))
+            if _is_good_url(url):
+                return url
+    except Exception:
+        pass
     return None
 
 
@@ -274,7 +313,7 @@ async def find_website_for_company(
     q: str,
     current_user: User = Depends(get_current_user),
 ):
-    """根據公司名稱搜尋官方網站（DuckDuckGo → Bing → 域名猜測）"""
+    """根據公司名稱搜尋官方網站（DuckDuckGo → Bing → Google → 域名猜測）"""
     import re as _re
 
     is_english = bool(_re.match(r'^[A-Za-z0-9\s\.\,\-\&\(\)\/]+$', q.strip()))
@@ -311,7 +350,14 @@ async def find_website_for_company(
                     if found:
                         break
 
-            # 3. 域名猜測（僅英文名稱）
+            # 3. Google 備援
+            if not found:
+                for search_q in candidates:
+                    found = await _search_google(client, search_q)
+                    if found:
+                        break
+
+            # 4. 域名猜測（僅英文名稱）
             if not found and is_english:
                 found = await _guess_domain(client, q)
 
@@ -371,7 +417,7 @@ async def find_phone_for_company(
                             if digits.startswith('886'):
                                 digits = '0' + digits[3:]
                             if 8 <= len(digits) <= 10 and digits.startswith('0'):
-                                return {"phone": digits[:2] + '-' + digits[2:6] + '-' + digits[6:] if len(digits) == 10 else digits}
+                                return {"phone": _fmt_phone_digits(digits)}
                         text = _re.sub(r'<[^>]+>', ' ', resp.text)
                         m = _TW_PHONE.search(text)
                         if m:
@@ -410,13 +456,7 @@ async def find_phone_for_company(
                 # 備援：把所有非數字去掉，只留數字，重新組成電話
                 digits_only = _re.sub(r'\D', '', raw)
                 if 8 <= len(digits_only) <= 10 and digits_only.startswith('0'):
-                    # 自動補格式：02/04/07 開頭 8 碼市話，或 09 開頭手機
-                    if digits_only.startswith('09') and len(digits_only) == 10:
-                        return {"phone": f"{digits_only[:4]}-{digits_only[4:7]}-{digits_only[7:]}"}
-                    elif len(digits_only) == 10:
-                        return {"phone": f"{digits_only[:2]}-{digits_only[2:6]}-{digits_only[6:]}"}
-                    elif len(digits_only) == 9:
-                        return {"phone": f"{digits_only[:3]}-{digits_only[3:6]}-{digits_only[6:]}"}
+                    return {"phone": _fmt_phone_digits(digits_only)}
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
@@ -440,12 +480,7 @@ async def find_phone_for_company(
             if digits.startswith('886'):
                 digits = '0' + digits[3:]
             if 8 <= len(digits) <= 10 and digits.startswith('0'):
-                if digits.startswith('09') and len(digits) == 10:
-                    return f"{digits[:4]}-{digits[4:7]}-{digits[7:]}"
-                elif len(digits) == 10:
-                    return f"{digits[:2]}-{digits[2:6]}-{digits[6:]}"
-                elif len(digits) == 9:
-                    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+                return _fmt_phone_digits(digits)
         # 2. JSON-LD 結構化資料
         for script in _re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, _re.S):
             m = _TW_PHONE.search(script)
