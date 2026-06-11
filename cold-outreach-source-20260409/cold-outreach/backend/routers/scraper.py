@@ -401,14 +401,34 @@ async def find_phone_for_company(
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
-    # 2. DuckDuckGo / Bing 備援（從搜尋結果摘要抓 regex）
+    # 2. 台灣黃頁（yellow.com.tw）— 有結構化電話資料
+    try:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
+            yellow_url = f"https://www.yellow.com.tw/search/list?keyword={_urlparse.quote(q)}"
+            resp = await client.get(yellow_url, timeout=10)
+            text = _re.sub(r'<[^>]+>', ' ', resp.text)
+            m = _TW_PHONE.search(text)
+            if m:
+                return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+    except Exception as e:
+        logger.warning(f"find-phone yellow.com.tw error for {q!r}: {e}")
+
+    # 3. DuckDuckGo / Bing / Google 備援
     async def _search_for_phone(client, query: str) -> _Opt[str]:
-        for url in [
+        sources = [
             f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
             f"https://www.bing.com/search?q={_urlparse.quote(query)}",
-        ]:
+            f"https://www.google.com/search?q={_urlparse.quote(query)}&hl=zh-TW",
+        ]
+        for url in sources:
             try:
                 resp = await client.get(url, timeout=12)
+                # 先找 JSON-LD 結構化資料
+                for script in _re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', resp.text, _re.S):
+                    m = _TW_PHONE.search(script)
+                    if m:
+                        return _re.sub(r'\s+', '-', m.group(1).strip())
+                # 再找純文字
                 text = _re.sub(r'<[^>]+>', ' ', resp.text)
                 m = _TW_PHONE.search(text)
                 if m:
@@ -422,7 +442,7 @@ async def find_phone_for_company(
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True) as client:
             found = await _search_for_phone(client, f"{q} 電話")
             if not found:
-                found = await _search_for_phone(client, f"{q} 聯絡電話")
+                found = await _search_for_phone(client, f"{q} 聯絡電話 台灣")
     except Exception as e:
         logger.warning(f"find-phone fallback error for {q!r}: {e}")
 
