@@ -694,7 +694,7 @@ def import_job(
             city=c.get("city"),
             company_size=c.get("company_size"),
             source=source_label,
-            assigned_to=current_user.id,
+            assigned_to=None,
             status=LeadStatus.claiming,
             notes=c.get("notes"),
         )

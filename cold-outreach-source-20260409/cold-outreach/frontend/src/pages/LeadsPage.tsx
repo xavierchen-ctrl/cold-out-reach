@@ -1305,7 +1305,7 @@ export default function LeadsPage() {
               {/* 手機版：card list */}
               <div className="lg:hidden space-y-3 mt-4">
                 {filteredLeads.map(lead => {
-                  const canAccess = isApprover(user) || user?.id === lead.assigned_to
+                  const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
                   return (
                   <div
                     key={lead.id}
@@ -1384,7 +1384,7 @@ export default function LeadsPage() {
                     </thead>
                     <tbody className="divide-y">
                       {filteredLeads.map(lead => {
-                        const canAccess = isApprover(user) || user?.id === lead.assigned_to
+                        const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
                         return (
                         <tr
                           key={lead.id}
