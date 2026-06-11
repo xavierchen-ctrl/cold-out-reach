@@ -90,7 +90,7 @@ export default function ScraperJobPage() {
   const handleFindPhone = async (idx: number, companyName: string) => {
     setFindingPhone(prev => new Set(prev).add(idx))
     try {
-      const res = await findCompanyPhone(companyName)
+      const res = await findCompanyPhone(companyName, companies[idx]?.website)
       const phone: string | null = res.data.phone
       if (phone) {
         setCompanies(prev => prev.map((c, i) => i === idx ? { ...c, phone } : c))

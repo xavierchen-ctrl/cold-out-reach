@@ -324,9 +324,10 @@ async def find_website_for_company(
 @router.get("/find-phone")
 async def find_phone_for_company(
     q: str,
+    website: _Opt[str] = None,
     current_user: User = Depends(get_current_user),
 ):
-    """搜尋公司電話：優先用 Gemini + Google Search Grounding，備援 DuckDuckGo/Bing regex"""
+    """搜尋公司電話：先爬官網，再用 Gemini，再用 DuckDuckGo/Bing"""
     import re as _re
     import os as _os2
 
@@ -340,6 +341,26 @@ async def find_phone_for_company(
         r')'
         r'(?!\d)'
     )
+
+    # 0. 直接爬公司已知網站（最快最準）
+    if website:
+        try:
+            urls_to_try = [website]
+            for suffix in ['/contact', '/about', '/contactus', '/聯絡我們', '/聯絡']:
+                base = website.rstrip('/')
+                urls_to_try.append(base + suffix)
+            async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=10) as client:
+                for url in urls_to_try:
+                    try:
+                        resp = await client.get(url, timeout=8)
+                        text = _re.sub(r'<[^>]+>', ' ', resp.text)
+                        m = _TW_PHONE.search(text)
+                        if m:
+                            return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"find-phone website scrape error for {website!r}: {e}")
 
     # 1. Gemini + Google Search Grounding（最準確，可抓 Knowledge Panel）
     gemini_key = _os2.getenv("GEMINI_API_KEY", "")
