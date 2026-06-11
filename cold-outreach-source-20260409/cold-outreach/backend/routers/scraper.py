@@ -467,13 +467,7 @@ async def find_phone_for_company(
                 )
                 model = genai.GenerativeModel("gemini-2.0-flash", tools=[tool])
             except Exception:
-                try:
-                    tool = genai.protos.Tool(
-                        google_search_retrieval=genai.protos.GoogleSearchRetrieval()
-                    )
-                    model = genai.GenerativeModel("gemini-1.5-flash", tools=[tool])
-                except Exception:
-                    model = genai.GenerativeModel("gemini-1.5-flash")
+                model = genai.GenerativeModel("gemini-2.0-flash")
             resp = model.generate_content(prompt)
             raw = resp.text.strip()
             logger.info(f"find-phone gemini raw for {q!r}: {raw!r}")
