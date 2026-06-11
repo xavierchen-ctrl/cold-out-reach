@@ -388,17 +388,40 @@ async def find_phone_for_company(
         r'(?!\d)'
     )
 
-    # 0a. 台灣商業司 findbiz（有登記電話，格式如 (04)22794607）
+    # 0a. 台灣商業司 findbiz（先搜名稱取統編，再抓詳細頁電話）
     try:
-        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
-            findbiz_url = f"https://findbiz.nat.gov.tw/fts/query/QueryList/queryList.do?qyFreedom={_urlparse.quote(q)}&isSGST=Y&isHMD=N&isALL=Y"
-            resp = await client.get(findbiz_url, timeout=10)
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
+            list_url = f"https://findbiz.nat.gov.tw/fts/query/QueryList/queryList.do?qyFreedom={_urlparse.quote(q)}&isSGST=Y&isHMD=N&isALL=Y"
+            resp = await client.get(list_url, timeout=10)
+            ban_nos = _re.findall(r'banNo=(\d{8})', resp.text)
+            if ban_nos:
+                detail_resp = await client.get(
+                    f"https://findbiz.nat.gov.tw/fts/query/QueryBrief/queryBrief.do?banNo={ban_nos[0]}",
+                    timeout=10,
+                )
+                text = _re.sub(r'<[^>]+>', ' ', detail_resp.text)
+                m = _TW_PHONE.search(text)
+                if m:
+                    return {"phone": _re.sub(r'[\s]+', '-', m.group(1).strip())}
+            # 備援：list page 本身也試
             text = _re.sub(r'<[^>]+>', ' ', resp.text)
             m = _TW_PHONE.search(text)
             if m:
                 return {"phone": _re.sub(r'[\s]+', '-', m.group(1).strip())}
     except Exception as e:
         logger.warning(f"find-phone findbiz error for {q!r}: {e}")
+
+    # 0b-2. twincn.com 台灣公司網
+    try:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
+            twincn_url = f"https://www.twincn.com/search.aspx?r=1&q={_urlparse.quote(q)}"
+            resp = await client.get(twincn_url, timeout=10)
+            text = _re.sub(r'<[^>]+>', ' ', resp.text)
+            m = _TW_PHONE.search(text)
+            if m:
+                return {"phone": _re.sub(r'[\s]+', '-', m.group(1).strip())}
+    except Exception as e:
+        logger.warning(f"find-phone twincn error for {q!r}: {e}")
 
     # 0b. 直接爬公司已知網站（最快最準）
     if website:
@@ -442,9 +465,15 @@ async def find_phone_for_company(
                 tool = genai.protos.Tool(
                     google_search_retrieval=genai.protos.GoogleSearchRetrieval()
                 )
-                model = genai.GenerativeModel("gemini-1.5-flash", tools=[tool])
+                model = genai.GenerativeModel("gemini-2.0-flash", tools=[tool])
             except Exception:
-                model = genai.GenerativeModel("gemini-1.5-flash")
+                try:
+                    tool = genai.protos.Tool(
+                        google_search_retrieval=genai.protos.GoogleSearchRetrieval()
+                    )
+                    model = genai.GenerativeModel("gemini-1.5-flash", tools=[tool])
+                except Exception:
+                    model = genai.GenerativeModel("gemini-1.5-flash")
             resp = model.generate_content(prompt)
             raw = resp.text.strip()
             logger.info(f"find-phone gemini raw for {q!r}: {raw!r}")
