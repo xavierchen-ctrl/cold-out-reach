@@ -326,70 +326,76 @@ async def find_phone_for_company(
     q: str,
     current_user: User = Depends(get_current_user),
 ):
-    """搜尋公司電話：DuckDuckGo/Bing 搜尋後從頁面文字抓台灣電話格式"""
+    """搜尋公司電話：優先用 Gemini + Google Search Grounding，備援 DuckDuckGo/Bing regex"""
     import re as _re
+    import os as _os2
 
     _TW_PHONE = _re.compile(
         r'(?<!\d)'
         r'('
-        r'0800[-\s]?\d{3}[-\s]?\d{3}'          # 0800 免付費
-        r'|0[2-9]\d[-\s]?\d{3,4}[-\s]?\d{4}'   # 市話：02-1234-5678
-        r'|09\d{2}[-\s]?\d{3}[-\s]?\d{3}'      # 手機：0912-345-678
-        r'|\(\d{2}\)\s*\d{3,4}[-\s]\d{4}'      # (02) 1234-5678
+        r'0800[-\s]?\d{3}[-\s]?\d{3}'
+        r'|0[2-9]\d[-\s]?\d{3,4}[-\s]?\d{4}'
+        r'|09\d{2}[-\s]?\d{3}[-\s]?\d{3}'
+        r'|\(\d{2}\)\s*\d{3,4}[-\s]\d{4}'
         r')'
         r'(?!\d)'
     )
 
-    async def _extract_phone_from_url(client, url: str) -> _Opt[str]:
+    # 1. Gemini + Google Search Grounding（最準確，可抓 Knowledge Panel）
+    gemini_key = _os2.getenv("GEMINI_API_KEY", "")
+    if gemini_key:
         try:
-            resp = await client.get(url, timeout=10, follow_redirects=True)
-            text = _re.sub(r'<[^>]+>', ' ', resp.text)
-            m = _TW_PHONE.search(text)
-            if m:
-                return _re.sub(r'[\s]', '-', m.group(1).strip())
-        except Exception:
-            pass
-        return None
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            prompt = (
+                f"請用 Google Search 查詢台灣公司「{q}」的聯絡電話。"
+                f"只回傳電話號碼本身（格式如 02-12345678 或 0912-345-678），"
+                f"找不到就回傳 null。不要加任何說明。"
+            )
+            try:
+                tool = genai.protos.Tool(
+                    google_search_retrieval=genai.protos.GoogleSearchRetrieval()
+                )
+                model = genai.GenerativeModel("gemini-1.5-flash", tools=[tool])
+            except Exception:
+                model = genai.GenerativeModel("gemini-1.5-flash")
+            resp = model.generate_content(prompt)
+            raw = resp.text.strip()
+            if raw and raw.lower() != "null":
+                m = _TW_PHONE.search(raw)
+                if m:
+                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                # Gemini 直接回傳乾淨的電話字串
+                cleaned = _re.sub(r'[^\d\-\(\)\+]', '', raw)
+                if len(cleaned) >= 8:
+                    return {"phone": raw.strip()}
+        except Exception as e:
+            logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
+    # 2. DuckDuckGo / Bing 備援（從搜尋結果摘要抓 regex）
     async def _search_for_phone(client, query: str) -> _Opt[str]:
-        # 先從搜尋結果摘要文字找電話
-        try:
-            resp = await client.get(
-                f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
-                timeout=12,
-            )
-            text = _re.sub(r'<[^>]+>', ' ', resp.text)
-            m = _TW_PHONE.search(text)
-            if m:
-                return _re.sub(r'[\s]', '-', m.group(1).strip())
-        except Exception:
-            pass
-
-        # Bing 備援
-        try:
-            resp = await client.get(
-                f"https://www.bing.com/search?q={_urlparse.quote(query)}",
-                timeout=12,
-            )
-            text = _re.sub(r'<[^>]+>', ' ', resp.text)
-            m = _TW_PHONE.search(text)
-            if m:
-                return _re.sub(r'[\s]', '-', m.group(1).strip())
-        except Exception:
-            pass
-
+        for url in [
+            f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
+            f"https://www.bing.com/search?q={_urlparse.quote(query)}",
+        ]:
+            try:
+                resp = await client.get(url, timeout=12)
+                text = _re.sub(r'<[^>]+>', ' ', resp.text)
+                m = _TW_PHONE.search(text)
+                if m:
+                    return _re.sub(r'\s+', '-', m.group(1).strip())
+            except Exception:
+                pass
         return None
 
     found = None
     try:
-        async with httpx.AsyncClient(
-            headers=_SEARCH_HEADERS, follow_redirects=True
-        ) as client:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True) as client:
             found = await _search_for_phone(client, f"{q} 電話")
             if not found:
                 found = await _search_for_phone(client, f"{q} 聯絡電話")
     except Exception as e:
-        logger.warning(f"find-phone error for {q!r}: {e}")
+        logger.warning(f"find-phone fallback error for {q!r}: {e}")
 
     return {"phone": found}
 
