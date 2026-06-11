@@ -3,7 +3,7 @@ import re
 import json
 from pathlib import Path
 
-import google.generativeai as genai
+from openai import OpenAI
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -16,7 +16,16 @@ from pptx_generator import generate_pptx, extract_design_tokens, embed_external_
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+
+def _openai_json(prompt: str) -> dict:
+    oai = OpenAI(api_key=OPENAI_API_KEY)
+    return json.loads(oai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    ).choices[0].message.content)
 
 # ── Wavenet 固定公司介紹（Phase 1）────────────────────────────────────────────
 
@@ -55,9 +64,10 @@ WAVENET_PHASE1 = {
 
 class GenerateProposalRequest(BaseModel):
     lead_id: str
-    product_focus: str = "廣告投放"   # 廣告投放 / SEO優化 / 社群代操 / 整合行銷
-    budget_range: str = "50-100萬/月"  # 月預算區間
-    extra_context: str = ""            # 補充背景（可空白）
+    product_focus: str = "廣告投放"
+    budget_range: str = "50-100萬/月"
+    extra_context: str = ""
+    client_type: str = "b2c"  # b2c | b2b | b2b_biotech
 
 
 class UpdateProposalRequest(BaseModel):
@@ -212,12 +222,143 @@ channel_allocation 的 percentage 加總必須等於 100。
 """
 
 
-def _parse_gemini_response(raw: str) -> dict:
-    raw = raw.strip()
-    raw = re.sub(r'^```json\s*', '', raw, flags=re.MULTILINE)
-    raw = re.sub(r'^```\s*', '', raw, flags=re.MULTILINE)
-    raw = re.sub(r'\s*```$', '', raw)
-    return json.loads(raw)
+def _build_prompt_b2b_biotech(lead: Lead, product_focus: str, budget_range: str, extra_context: str) -> str:
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    score = lead.enriched_score or 0
+    has_gtm = tech.get("gtm", False)
+    has_pixel = tech.get("meta_pixel", False)
+    has_ga4 = tech.get("ga4", False)
+    has_meta_ads = ad.get("meta", {}).get("has_ads", False)
+    has_google_ads = ad.get("google_ads", {}).get("has_ads", False)
+
+    product_map = {
+        "LinkedIn ABM廣告": "LinkedIn 帳戶型廣告，精準觸及生技/製藥決策者",
+        "生技媒體公關": "生技專業媒體投稿與PR，建立行業信任度",
+        "Google Search/SEO": "技術關鍵字搜尋廣告與自然排名，捕捉主動評估需求",
+        "會展行銷": "BIO USA / CPHI 等國際展會數位廣告與潛客開發",
+        "思想領導力內容": "白皮書、Webinar、案例研究，建立技術權威地位",
+        "Geo-fencing廣告": "展會現場與競爭對手辦公室精準地理圍欄廣告",
+    }
+    product_desc = product_map.get(product_focus, product_focus)
+
+    return f"""
+你是潮網科技（Wavenet Technology）的資深 B2B 生技產業行銷顧問。
+請根據以下客戶資訊，產生一份完整的 B2B 生技/製藥數位行銷提案大綱（繁體中文）。
+
+## 客戶資訊
+- 公司名稱：{lead.company_name}
+- 聯絡人：{lead.contact_name or "行銷/BD主管"}
+- 職稱：{lead.title or "行銷主管"}
+- 產業：{lead.industry or "生技/製藥"}
+- 官網：{lead.website or "未提供"}
+- 含金量分數：{score}/100
+- 主推服務：{product_focus}（{product_desc}）
+- 預算規模：{budget_range}
+{f"- 補充背景：{extra_context}" if extra_context else ""}
+
+## 客戶現況偵測
+- Google Tag Manager：{"✅ 已安裝" if has_gtm else "❌ 未安裝"}
+- Meta Pixel：{"✅ 已安裝" if has_pixel else "❌ 未安裝"}
+- GA4：{"✅ 已安裝" if has_ga4 else "❌ 未安裝"}
+- Meta 廣告：{"✅ 有在投放" if has_meta_ads else "❌ 未偵測到"}
+- Google 廣告：{"✅ 有在投放" if has_google_ads else "❌ 未偵測到"}
+
+## 輸出格式（嚴格 JSON，所有內容針對 B2B 生技決策者行銷）
+
+{{
+  "proposal_title": "提案標題（含公司名稱，強調B2B合作夥伴開發）",
+  "phase2": {{
+    "title": "B2B 決策者旅程規劃",
+    "current_diagnosis": "根據客戶現況的2-3句診斷（強調生技B2B數位行銷不足之處）",
+    "recommended_approach": "針對{lead.industry or "生技"}產業的整體B2B行銷策略方向（2-3句，強調精準觸及決策者）",
+    "funnel": [
+      {{
+        "stage": "認知建立 (Awareness)",
+        "objective": "讓目標決策者認識品牌",
+        "channels": ["LinkedIn Sponsored Content", "生技媒體原生廣告"],
+        "audience": "製藥公司採購/BD/研發主管",
+        "kpi": "LinkedIn觸及率 / 官網訪問數"
+      }},
+      {{
+        "stage": "評估考量 (Consideration)",
+        "objective": "建立技術可信度，促進內容下載",
+        "channels": ["白皮書/案例研究", "Google Search 技術關鍵字"],
+        "audience": "已訪問官網的目標決策者",
+        "kpi": "內容下載數 / 展示申請數"
+      }},
+      {{
+        "stage": "技術驗證 (Validation)",
+        "objective": "提供技術依據，推進商務洽談",
+        "channels": ["Webinar/技術研討", "個人化 LinkedIn InMail"],
+        "audience": "高意向決策者（下載過內容）",
+        "kpi": "Webinar 報名數 / 商務會議安排數"
+      }},
+      {{
+        "stage": "合作決策 (Decision)",
+        "objective": "促成合作協議或技術授權",
+        "channels": ["決策者再行銷", "ROI 計算工具", "媒體公關"],
+        "audience": "進入商務流程的合作候選方",
+        "kpi": "商務提案數 / 合作轉化率"
+      }}
+    ],
+    "key_insight": "針對此生技客戶的關鍵洞察（1句，強調B2B決策週期長、需建立信任的特點）"
+  }},
+  "phase3": {{
+    "title": "生技B2B市場數據洞察",
+    "benchmarks": {{
+      "industry_avg_roas": "B2B生技LinkedIn廣告平均CPL（如 NT$800-2000/潛客）",
+      "industry_avg_cpc": "Google技術關鍵字平均CPC（如 NT$25-60）",
+      "industry_avg_ctr": "LinkedIn Sponsored Content平均CTR（如 0.4-0.8%）",
+      "industry_avg_cvr": "白皮書下載頁轉換率（如 8-15%）"
+    }},
+    "competitive_gap": "此生技客戶相較同類競品的數位行銷差距分析（2句）",
+    "growth_opportunities": ["機會點1（針對生技B2B）", "機會點2", "機會點3"]
+  }},
+  "phase4": {{
+    "title": "思想領導力內容策略",
+    "recommended_formats": ["技術白皮書/研究報告", "網路研討會 (Webinar)", "同儕評審發表/生技媒體投稿"],
+    "creative_dimensions": {{
+      "trust_building": {{
+        "name": "技術可信度建立",
+        "description": "透過科學數據、臨床驗證、IP展示建立技術護城河形象",
+        "examples": ["技術優勢比較表", "合作案例ROI展示"]
+      }},
+      "pain_point": {{
+        "name": "合作夥伴痛點訴求",
+        "description": "針對製藥公司、CRO、投資方的核心需求與挑戰提出解法",
+        "examples": ["開發時程縮短案例", "法規合規解決方案"]
+      }},
+      "conversion": {{
+        "name": "合作行動呼籲",
+        "description": "引導至展示申請、技術洽談、展會見面等高意向行動",
+        "examples": ["免費技術評估申請", "展會預約見面邀請"]
+      }}
+    }}
+  }},
+  "phase5": {{
+    "title": "B2B媒體預算規劃",
+    "monthly_budget": "{budget_range}",
+    "channel_allocation": [
+      {{"channel": "LinkedIn ABM廣告", "percentage": 35, "rationale": "精準觸及製藥/生技決策者，B2B最高效管道"}},
+      {{"channel": "Google Search/SEO", "percentage": 25, "rationale": "捕捉主動評估技術供應商的高意向搜尋"}},
+      {{"channel": "生技媒體公關", "percentage": 20, "rationale": "在專業媒體建立技術可信度"}},
+      {{"channel": "內容行銷/Webinar", "percentage": 20, "rationale": "白皮書與研討會深化潛客關係"}}
+    ],
+    "key_campaigns": [
+      {{"name": "LinkedIn 決策者ABM活動", "timing": "Q1-Q2持續投放", "focus": "Sponsored Content + InMail精準觸及"}},
+      {{"name": "國際展會配套數位廣告", "timing": "展前1個月+展中", "focus": "Geo-fencing + 展後潛客再行銷"}}
+    ],
+    "expected_roas": "B2B生技預期CPL：NT$500-1500/合格潛客",
+    "timeline_note": "建議簽約後第1個月完成官網優化與LinkedIn主頁建立，第2-3個月啟動廣告投放，第4個月起進入內容深化階段。"
+  }},
+  "email_subject": "開發信主旨（含公司名稱，15字以內，強調B2B合作）",
+  "email_body": "開發信正文（繁體中文，200-300字，針對生技B2B決策者，包含：開場→技術現況→解法→B2B案例→CTA→簽名）"
+}}
+
+請確保所有內容都針對 {lead.company_name} 的 {lead.industry or "生技"} B2B業態量身訂製，
+channel_allocation 的 percentage 加總必須等於 100。
+"""
 
 
 # ── Template management ───────────────────────────────────────────────────────
@@ -333,40 +474,22 @@ async def generate_proposal(
     current_user: User = Depends(get_current_user),
 ):
     """AI 產生 5 階段提案並存入資料庫"""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    prompt = _build_prompt(lead, body.product_focus, body.budget_range, body.extra_context)
+    if body.client_type == "b2b_biotech":
+        prompt = _build_prompt_b2b_biotech(lead, body.product_focus, body.budget_range, body.extra_context)
+    else:
+        prompt = _build_prompt(lead, body.product_focus, body.budget_range, body.extra_context)
 
-    import asyncio
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel("gemini-2.0-flash")
-    data = None
-    last_err = None
-    for attempt in range(3):
-        try:
-            response = model.generate_content(prompt)
-            data = _parse_gemini_response(response.text)
-            break
-        except Exception as e:
-            last_err = e
-            err_str = str(e)
-            is_rate_limit = "429" in err_str or "quota" in err_str.lower()
-            if attempt < 2 and is_rate_limit:
-                # Parse suggested retry delay from the error message
-                import re as _re
-                m = _re.search(r'retry in\s+([\d.]+)\s*s', err_str, _re.IGNORECASE)
-                wait_sec = float(m.group(1)) + 5 if m else 35
-                wait_sec = min(wait_sec, 65)  # cap at 65s to avoid ridiculous waits
-                await asyncio.sleep(wait_sec)
-                continue
-            raise HTTPException(status_code=500, detail=f"AI 生成失敗：{err_str}")
-    if data is None:
-        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(last_err)}")
+    try:
+        data = _openai_json(prompt)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
     content = {
         "phase1": WAVENET_PHASE1,

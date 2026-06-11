@@ -277,6 +277,7 @@ export const generateProposal = (data: {
   product_focus: string
   budget_range: string
   extra_context?: string
+  client_type?: string
 }) => api.post('/proposals/generate', data)
 export const updateProposal = (id: string, data: Record<string, unknown>) =>
   api.patch(`/proposals/${id}`, data)
@@ -348,5 +349,5 @@ export const uploadPptxTemplate = (file: File) => {
 export const generatePptxDownload = (lead_id: string, extra_context?: string, use_template?: boolean) =>
   api.post('/ai/generate-pptx', { lead_id, extra_context: extra_context || '', use_template: use_template ?? false }, { responseType: 'blob' })
 
-export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[]) =>
-  api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [] })
+export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[], client_type?: string) =>
+  api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [], client_type: client_type || 'b2c' })

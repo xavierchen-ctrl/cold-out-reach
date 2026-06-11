@@ -96,12 +96,28 @@ interface Lead {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const PRODUCT_OPTIONS = [
+const PRODUCT_OPTIONS_B2C = [
   '廣告投放', 'SEO優化', '社群代操', '整合行銷', 'KOL行銷', '程序化廣告',
 ]
 
-const BUDGET_OPTIONS = [
+const PRODUCT_OPTIONS_B2B_BIOTECH = [
+  'LinkedIn ABM廣告', '生技媒體公關', 'Google Search/SEO', '會展行銷', '思想領導力內容', 'Geo-fencing廣告',
+]
+
+const BUDGET_OPTIONS_B2C = [
   '10-30萬/月', '30-50萬/月', '50-100萬/月', '100萬以上/月',
+]
+
+const BUDGET_OPTIONS_B2B_BIOTECH = [
+  '100-200萬/年', '200-500萬/年', '500萬以上/年',
+]
+
+type ClientType = 'b2c' | 'b2b' | 'b2b_biotech'
+
+const CLIENT_TYPE_OPTIONS: { value: ClientType; label: string; desc: string }[] = [
+  { value: 'b2c', label: 'B2C 消費者品牌', desc: '保健食品、電商、零售' },
+  { value: 'b2b', label: 'B2B 企業服務', desc: 'SaaS、製造業、整合服務' },
+  { value: 'b2b_biotech', label: 'B2B 生技製藥', desc: '生技新創、藥廠、醫療器材' },
 ]
 
 const STATUS_COLORS: Record<string, string> = {
@@ -276,12 +292,25 @@ function GenerateDialog({
   onGenerated: () => void
 }) {
   const [leads, setLeads] = useState<Lead[]>([])
+  const [clientType, setClientType] = useState<ClientType>('b2c')
   const [form, setForm] = useState({
     lead_id: '',
     product_focus: '廣告投放',
     budget_range: '50-100萬/月',
     extra_context: '',
   })
+
+  const handleClientTypeChange = (type: ClientType) => {
+    setClientType(type)
+    if (type === 'b2b_biotech') {
+      setForm(f => ({ ...f, product_focus: 'LinkedIn ABM廣告', budget_range: '200-500萬/年' }))
+    } else {
+      setForm(f => ({ ...f, product_focus: '廣告投放', budget_range: '50-100萬/月' }))
+    }
+  }
+
+  const currentProductOptions = clientType === 'b2b_biotech' ? PRODUCT_OPTIONS_B2B_BIOTECH : PRODUCT_OPTIONS_B2C
+  const currentBudgetOptions = clientType === 'b2b_biotech' ? BUDGET_OPTIONS_B2B_BIOTECH : BUDGET_OPTIONS_B2C
   const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -345,7 +374,7 @@ function GenerateDialog({
       // Collect image data URLs for vision
       const contextImages = contextFiles.filter(cf => cf.preview).map(cf => cf.preview!)
 
-      const res = await generatePptxContent(form.lead_id, fullContext, contextImages)
+      const res = await generatePptxContent(form.lead_id, fullContext, contextImages, clientType)
       const data = res.data
       const blob = await generatePptxBlob(data)
       const url = window.URL.createObjectURL(blob)
@@ -369,6 +398,28 @@ function GenerateDialog({
           <DialogTitle>產生提案</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
+          {/* 客戶類型 */}
+          <div>
+            <Label className="mb-1.5 block">客戶類型</Label>
+            <div className="grid grid-cols-3 gap-2">
+              {CLIENT_TYPE_OPTIONS.map(opt => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => handleClientTypeChange(opt.value)}
+                  className={`flex flex-col items-start px-2.5 py-2 rounded-lg border text-left transition-colors text-xs ${
+                    clientType === opt.value
+                      ? 'bg-primary/10 border-primary text-primary'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  <span className="font-semibold leading-snug">{opt.label}</span>
+                  <span className="text-muted-foreground mt-0.5 leading-tight">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
           {/* 客戶選擇 */}
           <div>
             <Label>選擇客戶 *</Label>
@@ -399,7 +450,7 @@ function GenerateDialog({
               <Select value={form.product_focus} onValueChange={v => setForm(f => ({ ...f, product_focus: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {PRODUCT_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                  {currentProductOptions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -408,7 +459,7 @@ function GenerateDialog({
               <Select value={form.budget_range} onValueChange={v => setForm(f => ({ ...f, budget_range: v }))}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {BUDGET_OPTIONS.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                  {currentBudgetOptions.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

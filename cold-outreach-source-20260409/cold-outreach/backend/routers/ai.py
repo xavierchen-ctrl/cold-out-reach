@@ -10,7 +10,6 @@ from pptx import Presentation as PptxPresentation
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 import httpx
-import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from database import get_db
@@ -21,8 +20,26 @@ from utils import now_tw
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+def _openai_chat(prompt: str, model: str = "gpt-4o-mini") -> str:
+    from openai import OpenAI
+    oai = OpenAI(api_key=OPENAI_API_KEY)
+    return oai.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+    ).choices[0].message.content.strip()
+
+
+def _openai_json(prompt: str, model: str = "gpt-4o-mini") -> dict:
+    from openai import OpenAI
+    oai = OpenAI(api_key=OPENAI_API_KEY)
+    return json.loads(oai.chat.completions.create(
+        model=model,
+        messages=[{"role": "user", "content": prompt}],
+        response_format={"type": "json_object"},
+    ).choices[0].message.content)
+
 
 TEMPLATES = {
     "intro": "初次開發信。這是第一次接觸，請保持專業但友善，簡要介紹我們的數位行銷服務，並提出一個明確的行動呼籲（安排 15 分鐘通話）。",
@@ -37,8 +54,8 @@ def generate_draft(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if not lead:
@@ -77,12 +94,9 @@ BODY:
 不要加任何其他說明。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        text = _openai_chat(prompt)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
     # Parse subject + body
     subject = ""
@@ -318,24 +332,17 @@ async def _scrape_contact_info(website: str) -> dict:
             emails = _find_emails(text)
             phones = _find_phones(text)
 
-            # ── Step 7: Gemini fallback if regex finds nothing ─────────────
-            if not emails and not phones and GEMINI_API_KEY:
+            # ── Step 7: OpenAI fallback if regex finds nothing ────────────
+            if not emails and not phones and OPENAI_API_KEY:
                 snippet = text[:4000]
-                prompt = f"""以下是一個公司聯絡頁面的文字內容，請仔細尋找 Email 地址和電話號碼（包含台灣常見格式如 (02)2345-6789 或 0912-345-678）。
+                contact_prompt = f"""以下是一個公司聯絡頁面的文字內容，請仔細尋找 Email 地址和電話號碼（包含台灣常見格式如 (02)2345-6789 或 0912-345-678）。
 只回傳 JSON，格式如下（沒有則填 null）：
 {{"email": "第一個有效 email", "phone": "第一個有效電話"}}
 
 內容：
 {snippet}"""
                 try:
-                    genai.configure(api_key=GEMINI_API_KEY)
-                    model = genai.GenerativeModel("gemini-2.0-flash")
-                    resp = model.generate_content(prompt)
-                    raw = resp.text.strip()
-                    raw = _re.sub(r'^```json\s*', '', raw)
-                    raw = _re.sub(r'^```\s*', '', raw)
-                    raw = _re.sub(r'\s*```$', '', raw)
-                    parsed = json.loads(raw.strip())
+                    parsed = _openai_json(contact_prompt)
                     if parsed.get("email"):
                         emails = [parsed["email"]]
                     if parsed.get("phone"):
@@ -358,9 +365,9 @@ async def enrich_company(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Use Gemini to enrich company info (industry, city, company_size, email, phone)."""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    """Use OpenAI to enrich company info (industry, city, company_size, email, phone)."""
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     prompt = f"""請根據公司名稱「{body.company_name}」，推測並補全以下資訊（繁體中文，JSON格式回傳）：
 
@@ -375,19 +382,11 @@ async def enrich_company(
 只回傳JSON，不要任何說明。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        text = response.text.strip()
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-        data = json.loads(text.strip())
+        data = _openai_json(prompt)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail="AI 回傳格式錯誤")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
     # Auto-update the lead (basic fields — only fill empty)
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
@@ -441,8 +440,8 @@ def pipeline_health(
     current_user: User = Depends(get_current_user),
 ):
     """Analyze overall pipeline and return Markdown health report."""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     from sqlalchemy import func
 
@@ -484,12 +483,9 @@ def pipeline_health(
 保持專業、具體、可執行。字數約 300-500 字。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        return {"report": response.text.strip()}
+        return {"report": _openai_chat(prompt)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
 
 # ── Gmail Reply Detection ─────────────────────────────────────────────────────
@@ -605,8 +601,8 @@ async def generate_email(
     current_user: User = Depends(get_current_user),
 ):
     """Generate a customized email using the client's website content."""
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     # 1. Fetch website
     website_summary = ""
@@ -651,12 +647,9 @@ BODY:
 不要加任何其他說明。"""
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        text = response.text.strip()
+        text = _openai_chat(prompt)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"AI error: {str(e)}")
 
     # Parse subject + body
     subject = ""
@@ -695,10 +688,10 @@ async def generate_proposal(
     """
     生成完整提案信：
     1. 抓取 lead 的含金量分析結果（tech/ad signals）
-    2. 用 Gemini 生成包含客戶現況分析 + 潮網服務建議的提案信
+    2. 用 OpenAI 生成包含客戶現況分析 + 潮網服務建議的提案信
     """
-    if not GEMINI_API_KEY:
-        raise HTTPException(status_code=503, detail="Gemini API key not configured")
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
     if not lead:
@@ -770,14 +763,7 @@ async def generate_proposal(
 """
 
     try:
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel("gemini-2.0-flash")
-        response = model.generate_content(prompt)
-        raw = response.text.strip()
-        raw = re.sub(r'^```json\s*', '', raw)
-        raw = re.sub(r'^```\s*', '', raw)
-        raw = re.sub(r'\s*```$', '', raw)
-        data = json.loads(raw)
+        data = _openai_json(prompt)
         return {
             "subject": data.get("subject", ""),
             "body": data.get("body", ""),
@@ -1300,8 +1286,9 @@ async def upload_pptx_template(
 class GeneratePptxRequest(BaseModel):
     lead_id: str
     extra_context: str = ""
-    use_template: bool = False  # True only when user explicitly uploaded a template this session
-    context_images: list[str] = []  # data URLs (data:image/...;base64,...) uploaded by user
+    use_template: bool = False
+    context_images: list[str] = []
+    client_type: str = "b2c"  # b2c | b2b | b2b_biotech
 
 
 def _build_pptx_from_scratch(slides_data: list, company_name: str) -> io.BytesIO:
@@ -1565,14 +1552,24 @@ async def generate_pptx_content(
     website_section = f"\n【官網內容摘要（請以此為準，不得自行捏造公司業務）】\n{website_text}\n" if website_text else ""
     extra_section = f"\n【補充說明（優先參考）】\n{body.extra_context.strip()}\n" if body.extra_context and body.extra_context.strip() else ""
 
-    topics = [
-        f"關於 {lead.company_name}（公司概況、產業定位）",
-        "主要產品與服務",
-        "數位行銷現況分析",
-        "市場機會與挑戰",
-        "潮網建議合作方向",
-        "下一步行動計畫",
-    ]
+    if body.client_type == "b2b_biotech":
+        topics = [
+            f"關於 {lead.company_name}（技術平台、核心競爭力）",
+            "目標市場與潛在合作夥伴",
+            "B2B 數位行銷現況分析",
+            "生技產業行銷挑戰與機會",
+            "潮網 B2B 生技行銷解決方案",
+            "下一步合作行動計畫",
+        ]
+    else:
+        topics = [
+            f"關於 {lead.company_name}（公司概況、產業定位）",
+            "主要產品與服務",
+            "數位行銷現況分析",
+            "市場機會與挑戰",
+            "潮網建議合作方向",
+            "下一步行動計畫",
+        ]
     topics_str = "\n".join(f"{i+1}. {t}" for i, t in enumerate(topics))
 
     prompt = f"""你是潮網科技的業務顧問，正在為客戶製作提案簡報。
