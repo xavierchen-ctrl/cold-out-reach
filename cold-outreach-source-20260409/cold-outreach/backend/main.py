@@ -20,7 +20,7 @@ import models  # register all ORM models
 from routers import auth, leads, activities, gmail, ai, stats, scraper, scoring, bulk, sequences
 from routers import templates, email_scheduler, tracking, reports
 from routers import contacts, tags, attachments, ab_test, webhooks, notifications, analytics, keyword_tracker, weekly_report
-from routers import cadence, call_log, enrich, icp, signals, teams, approvals
+from routers import cadence, call_log, enrich, icp, signals, teams, approvals, proposal
 
 
 @asynccontextmanager
@@ -278,6 +278,7 @@ app.include_router(icp.router)
 app.include_router(signals.router)
 app.include_router(teams.router)
 app.include_router(approvals.router)
+app.include_router(proposal.router)
 
 
 # ── One-time DB init endpoint (safe: only creates if not exists) ───────────────
