@@ -301,13 +301,21 @@ export default function ScraperJobPage() {
                           </div>
                         </td>
 
-                        <td className="py-2 px-4 hidden lg:table-cell">
+                        <td className="py-2 px-4 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
                           {c.phone ? (
                             <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
                               <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
                             </div>
                           ) : (
-                            <span className="text-xs text-gray-300">—</span>
+                            <a
+                              href={`https://www.google.com/search?q=${encodeURIComponent(c.company_name + ' 電話')}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors w-fit"
+                              title="用 Google 搜尋電話"
+                            >
+                              <Search className="w-3 h-3" /> 查找電話
+                            </a>
                           )}
                         </td>
 
