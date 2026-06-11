@@ -32,9 +32,7 @@ def list_leads(
     current_user: User = Depends(get_current_user),
 ):
     q = db.query(Lead)
-    visible_ids = get_visible_user_ids(current_user, db)
-    if visible_ids is not None:
-        q = q.filter(Lead.assigned_to.in_(visible_ids))
+    # All roles can see all leads; ownership is enforced at the detail level
     if status:
         q = q.filter(Lead.status == status)
     if assigned_to and current_user.role == UserRole.admin:

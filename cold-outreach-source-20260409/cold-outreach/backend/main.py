@@ -148,6 +148,20 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[migration] team_lead enum: {e}")
 
+    # Migration: add claiming / called_no_answer to leadstatus enum
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TYPE leadstatus ADD VALUE IF NOT EXISTS 'claiming'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] leadstatus claiming: {e}")
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TYPE leadstatus ADD VALUE IF NOT EXISTS 'called_no_answer'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] leadstatus called_no_answer: {e}")
+
     # Migration: create teams and assign user roles
     try:
         with engine.connect() as conn:

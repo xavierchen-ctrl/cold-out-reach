@@ -1304,11 +1304,13 @@ export default function LeadsPage() {
             <>
               {/* 手機版：card list */}
               <div className="lg:hidden space-y-3 mt-4">
-                {filteredLeads.map(lead => (
+                {filteredLeads.map(lead => {
+                  const canAccess = isApprover(user) || user?.id === lead.assigned_to
+                  return (
                   <div
                     key={lead.id}
-                    className="bg-white rounded-lg border p-4 shadow-sm cursor-pointer active:bg-gray-50"
-                    onClick={() => navigate(`/leads/${lead.id}`)}
+                    className={`bg-white rounded-lg border p-4 shadow-sm ${canAccess ? 'cursor-pointer active:bg-gray-50' : 'cursor-default opacity-80'}`}
+                    onClick={() => { if (canAccess) navigate(`/leads/${lead.id}`) }}
                   >
                     <div className="flex justify-between items-start">
                       <div className="min-w-0 flex-1 mr-2">
@@ -1336,7 +1338,10 @@ export default function LeadsPage() {
                       </div>
                     )}
                     <div className="mt-2 flex items-center justify-between">
-                      <ScoreBadge score={lead.score} />
+                      <div className="flex items-center gap-2">
+                        <ScoreBadge score={lead.score} />
+                        {!canAccess && <span className="text-xs text-gray-400">🔒</span>}
+                      </div>
                       {user?.role !== 'sales' && (
                         <button
                           onClick={e => handleDelete(lead.id, e)}
@@ -1347,7 +1352,8 @@ export default function LeadsPage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  )
+                })}
                 <div className="text-center text-xs text-muted-foreground py-2">
                   共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
                 </div>
@@ -1367,6 +1373,7 @@ export default function LeadsPage() {
                         <th className="px-4 py-3 text-left font-medium">Email</th>
                         <th className="px-4 py-3 text-left font-medium">電話</th>
                         <th className="px-4 py-3 text-left font-medium">官網</th>
+                        <th className="px-4 py-3 text-left font-medium">接洽人</th>
                         <th className="px-4 py-3 text-left font-medium">狀態</th>
                         <th className="px-4 py-3 text-left font-medium">評分</th>
                         <th className="px-4 py-3 text-left font-medium cursor-pointer hover:text-primary" title="點擊依熱度排序">熱度 🔥</th>
@@ -1376,16 +1383,21 @@ export default function LeadsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {filteredLeads.map(lead => (
+                      {filteredLeads.map(lead => {
+                        const canAccess = isApprover(user) || user?.id === lead.assigned_to
+                        return (
                         <tr
                           key={lead.id}
-                          className={`hover:bg-muted/30 cursor-pointer transition-colors ${checked.has(lead.id) ? 'bg-indigo-50' : ''}`}
-                          onClick={() => navigate(`/leads/${lead.id}`)}
+                          className={`transition-colors ${canAccess ? 'hover:bg-muted/30 cursor-pointer' : 'cursor-default opacity-80'} ${checked.has(lead.id) ? 'bg-indigo-50' : ''}`}
+                          onClick={() => { if (canAccess) navigate(`/leads/${lead.id}`) }}
                         >
                           <td className="px-3 py-3" onClick={e => toggleCheck(lead.id, e)}>
                             <input type="checkbox" checked={checked.has(lead.id)} onChange={() => {}} className="rounded" />
                           </td>
-                          <td className="px-4 py-3 font-medium">{lead.company_name}</td>
+                          <td className="px-4 py-3 font-medium">
+                            {lead.company_name}
+                            {!canAccess && <span className="ml-1 text-xs text-gray-400">🔒</span>}
+                          </td>
                           <td className="px-4 py-3 text-muted-foreground">
                             {lead.contact_name || '—'}
                             {lead.title && <span className="text-xs ml-1">({lead.title})</span>}
@@ -1417,6 +1429,9 @@ export default function LeadsPage() {
                                 {lead.website.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]}
                               </a>
                             ) : <span className="text-xs text-gray-300">—</span>}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground">
+                            {lead.assigned_user?.name || <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-4 py-3"><StatusBadge status={lead.status} /></td>
                           <td className="px-4 py-3"><ScoreBadge score={lead.score} /></td>
@@ -1454,7 +1469,8 @@ export default function LeadsPage() {
                             )}
                           </td>
                         </tr>
-                      ))}
+                        )
+                      })}
                     </tbody>
                   </table>
                   <div className="px-4 py-2 border-t text-xs text-muted-foreground">

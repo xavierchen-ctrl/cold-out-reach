@@ -18,7 +18,9 @@ class UserRole(str, enum.Enum):
 
 class LeadStatus(str, enum.Enum):
     new = "new"
+    claiming = "claiming"
     contacted = "contacted"
+    called_no_answer = "called_no_answer"
     replied = "replied"
     meeting_scheduled = "meeting_scheduled"
     mql = "mql"

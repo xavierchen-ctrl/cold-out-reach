@@ -643,7 +643,6 @@ def import_job(
 
     companies = json.loads(job.result_json or "[]")
     source_label = f"exhibition:{job.source}"
-    assigned = body.assigned_to or current_user.id
 
     # 只匯入有 email 的
     if body.email_only:
@@ -695,8 +694,8 @@ def import_job(
             city=c.get("city"),
             company_size=c.get("company_size"),
             source=source_label,
-            assigned_to=assigned,
-            status=LeadStatus.new,
+            assigned_to=current_user.id,
+            status=LeadStatus.claiming,
             notes=c.get("notes"),
         )
         db.add(lead)

@@ -17,7 +17,9 @@ export interface User {
 
 export type LeadStatus =
   | 'new'
+  | 'claiming'
   | 'contacted'
+  | 'called_no_answer'
   | 'replied'
   | 'meeting_scheduled'
   | 'mql'
@@ -29,7 +31,9 @@ export type LeadStatus =
 
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   new: '新名單',
+  claiming: '認領中',
   contacted: '已聯繫',
+  called_no_answer: '已撥打未接',
   replied: '已回覆',
   meeting_scheduled: '會議確認',
   mql: 'MQL 行銷合格',
@@ -42,7 +46,9 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
 
 export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
   new: 'bg-gray-100 text-gray-700',
+  claiming: 'bg-sky-100 text-sky-700',
   contacted: 'bg-blue-100 text-blue-700',
+  called_no_answer: 'bg-amber-100 text-amber-700',
   replied: 'bg-yellow-100 text-yellow-700',
   meeting_scheduled: 'bg-purple-100 text-purple-700',
   mql: 'bg-orange-100 text-orange-700',
@@ -128,7 +134,7 @@ export const SCRAPER_SOURCES: Record<string, string> = {
   job_104: '104 人力銀行',
   job_1111: '1111 人力銀行',
   real_estate_591: '591 新成屋（建商電話）',
-  gemini_search: '🔍 Gemini 智能搜尋',
+  gemini_search: '🔍 AI 智能搜尋',
   custom_url: '自訂網址',
 }
 
