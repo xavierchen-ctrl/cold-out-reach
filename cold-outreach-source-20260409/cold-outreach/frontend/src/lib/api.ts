@@ -120,6 +120,8 @@ export const importScraperJob = (jobId: string, assigned_to?: string, email_only
   api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
 export const findCompanyWebsite = (q: string) =>
   api.get(`/scraper/find-website`, { params: { q } })
+export const findCompanyPhone = (q: string) =>
+  api.get(`/scraper/find-phone`, { params: { q } })
 export const updateScraperJobField = (jobId: string, index: number, field: string, value: string | null) =>
   api.patch(`/scraper/jobs/${jobId}/update-field`, { index, field, value })
 
