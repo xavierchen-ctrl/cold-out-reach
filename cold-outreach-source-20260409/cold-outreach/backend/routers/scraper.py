@@ -335,14 +335,26 @@ async def find_phone_for_company(
         r'(?<!\d)'
         r'('
         r'0800[-\s]?\d{3}[-\s]?\d{3}'
-        r'|0[2-9]\d?[-\s]?\d{3,4}[-\s]?\d{4}'   # 市話：02/04 + 8碼，或 049 + 7碼
+        r'|0[2-9]\d?[-\s]?\d{3,4}[-\s]?\d{4}'
         r'|09\d{2}[-\s]?\d{3}[-\s]?\d{3}'
-        r'|\(\d{2}\)\s*\d{3,4}[-\s]\d{4}'
+        r'|\(\d{2,3}\)\s*\d{3,4}[-\s]?\d{4}'    # (04)22794607 or (04) 2279-4607
         r')'
         r'(?!\d)'
     )
 
-    # 0. 直接爬公司已知網站（最快最準）
+    # 0a. 台灣商業司 findbiz（有登記電話，格式如 (04)22794607）
+    try:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
+            findbiz_url = f"https://findbiz.nat.gov.tw/fts/query/QueryList/queryList.do?qyFreedom={_urlparse.quote(q)}&isSGST=Y&isHMD=N&isALL=Y"
+            resp = await client.get(findbiz_url, timeout=10)
+            text = _re.sub(r'<[^>]+>', ' ', resp.text)
+            m = _TW_PHONE.search(text)
+            if m:
+                return {"phone": _re.sub(r'[\s]+', '-', m.group(1).strip())}
+    except Exception as e:
+        logger.warning(f"find-phone findbiz error for {q!r}: {e}")
+
+    # 0b. 直接爬公司已知網站（最快最準）
     if website:
         try:
             urls_to_try = [website]
