@@ -53,13 +53,13 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 google_search_retrieval=genai.protos.GoogleSearchRetrieval()
             )
             model = genai.GenerativeModel(
-                model_name="gemini-1.5-flash",
+                model_name="gemini-2.0-flash",
                 tools=[tool],
             )
         except Exception:
             # 若版本不支援 protos，降級為無 grounding
             logger.warning("Gemini: protos not available, falling back to no-grounding mode")
-            model = genai.GenerativeModel(model_name="gemini-1.5-flash")
+            model = genai.GenerativeModel(model_name="gemini-2.0-flash")
 
         response = model.generate_content(prompt)
         text = (response.text or "").strip()
