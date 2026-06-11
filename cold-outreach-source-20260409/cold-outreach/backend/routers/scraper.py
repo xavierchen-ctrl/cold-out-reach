@@ -348,9 +348,9 @@ async def find_phone_for_company(
             import google.generativeai as genai
             genai.configure(api_key=gemini_key)
             prompt = (
-                f"請用 Google Search 查詢台灣公司「{q}」的聯絡電話。"
-                f"只回傳電話號碼本身（格式如 02-12345678 或 0912-345-678），"
-                f"找不到就回傳 null。不要加任何說明。"
+                f"Search Google for the phone number of Taiwan company「{q}」. "
+                f"Reply with ONLY the phone number digits and hyphens (e.g. 04-23125688 or 0912-345-678). "
+                f"No explanation, no other text. If not found reply null."
             )
             try:
                 tool = genai.protos.Tool(
@@ -361,10 +361,22 @@ async def find_phone_for_company(
                 model = genai.GenerativeModel("gemini-1.5-flash")
             resp = model.generate_content(prompt)
             raw = resp.text.strip()
+            logger.info(f"find-phone gemini raw for {q!r}: {raw!r}")
             if raw and raw.lower() != "null":
+                # 先用 regex 直接 match
                 m = _TW_PHONE.search(raw)
                 if m:
                     return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                # 備援：把所有非數字去掉，只留數字，重新組成電話
+                digits_only = _re.sub(r'\D', '', raw)
+                if 8 <= len(digits_only) <= 10 and digits_only.startswith('0'):
+                    # 自動補格式：02/04/07 開頭 8 碼市話，或 09 開頭手機
+                    if digits_only.startswith('09') and len(digits_only) == 10:
+                        return {"phone": f"{digits_only[:4]}-{digits_only[4:7]}-{digits_only[7:]}"}
+                    elif len(digits_only) == 10:
+                        return {"phone": f"{digits_only[:2]}-{digits_only[2:6]}-{digits_only[6:]}"}
+                    elif len(digits_only) == 9:
+                        return {"phone": f"{digits_only[:3]}-{digits_only[3:6]}-{digits_only[6:]}"}
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
