@@ -162,6 +162,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[migration] leadstatus called_no_answer: {e}")
 
+    # Migration: clear assigned_to for all claiming leads (one-time fix)
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("UPDATE leads SET assigned_to = NULL WHERE status = 'claiming'"))
+            conn.commit()
+    except Exception as e:
+        print(f"[migration] clear claiming assigned_to: {e}")
+
     # Migration: create teams and assign user roles
     try:
         with engine.connect() as conn:
