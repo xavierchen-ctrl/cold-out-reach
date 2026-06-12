@@ -52,7 +52,6 @@ class ProposalRequest(BaseModel):
     monthly_budget: str
     special_notes: Optional[str] = None
     year: int = 2026
-    client_type: str = "b2c"
 
 
 @router.post("/generate")
@@ -64,10 +63,7 @@ async def generate_proposal(
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     try:
-        if body.client_type == "b2b_biotech":
-            content = await _generate_content_b2b_biotech(body)
-        else:
-            content = await _generate_content_b2c(body)
+        content = await _generate_content_unified(body)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
@@ -88,7 +84,6 @@ class GenerateFromLeadRequest(BaseModel):
     lead_id: str
     services: List[str] = ["廣告投放", "SEO優化"]
     budget_range: str = "50-100萬/月"
-    client_type: str = "b2c"
     extra_context: str = ""
     year: int = 2026
 
@@ -162,14 +157,10 @@ async def generate_from_lead(
         monthly_budget=monthly_budget,
         special_notes=None,
         year=body.year,
-        client_type=body.client_type,
     )
 
     try:
-        if proposal_req.client_type == "b2b_biotech":
-            content = await _generate_content_b2b_biotech(proposal_req)
-        else:
-            content = await _generate_content_b2c(proposal_req)
+        content = await _generate_content_unified(proposal_req)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
@@ -188,172 +179,109 @@ async def generate_from_lead(
 
 # ── AI content generation ─────────────────────────────────────────────────────
 
-async def _generate_content_b2c(body: ProposalRequest) -> dict:
+async def _generate_content_unified(body: ProposalRequest) -> dict:
     services_str = "、".join(body.services)
     special = f"\n特殊需求：{body.special_notes}" if body.special_notes else ""
     budget_num = re.sub(r"[^\d]", "", body.monthly_budget) or "100"
 
-    prompt = f"""你是潮網科技的資深數位行銷顧問，請根據以下資訊生成媒體提案內容（繁體中文）。
+    prompt = f"""你是潮網科技的資深數位行銷顧問，請根據以下資訊生成完整媒體提案內容（繁體中文）。
 
 客戶：{body.client_name} | 產業：{body.industry}
 月預算：{budget_num}萬 | 主推服務：{services_str}
 品牌現況：{body.current_situation}{special}
 
-輸出嚴格 JSON（根據客戶產業調整所有內容，勿使用預設範例）：
+本提案涵蓋所有行銷管道（Meta、Google、YouTube、KOL、LinkedIn、LINE CRM、展會、內容資產等），
+客戶可依實際需求自行刪減不適用的部分。請根據客戶產業特性生成最貼切的內容（勿使用預設範例）。
+
+輸出嚴格 JSON：
 
 {{
-  "subtitle": "副標題（20字內，描述品牌轉型方向）",
-  "brand_strengths": ["商品線優勢1", "商品線優勢2", "商品線優勢3"],
-  "brand_d2c": "D2C經營現況一句話說明（40字內）",
+  "subtitle": "副標題（20字內，描述品牌/業務成長方向）",
+  "brand_strengths": ["品牌/產品優勢1", "品牌/產品優勢2", "品牌/產品優勢3"],
+  "brand_d2c": "品牌直客/通路/商業模式現況說明（40字內）",
   "market_segments": [
-    {{"age": "25-40歲", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
-    {{"age": "35-55歲", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
-    {{"age": "50+", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}}
+    {{"age": "族群特徵1", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
+    {{"age": "族群特徵2", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
+    {{"age": "族群特徵3", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}}
   ],
   "problems": [
-    {{"title": "流量依賴廣告", "desc": "缺乏自生流量，獲客成本隨演算法波動"}},
-    {{"title": "缺乏品牌搜尋量", "desc": "消費者以類別搜尋，品牌指名度低"}},
-    {{"title": "會員回購率不足", "desc": "初購後流失率高，缺乏生命週期自動化"}}
+    {{"title": "問題標題1", "desc": "問題說明（30字內）"}},
+    {{"title": "問題標題2", "desc": "問題說明"}},
+    {{"title": "問題標題3", "desc": "問題說明"}}
   ],
   "kpis": [
-    {{"label": "品牌聲量成長", "value": "+50%"}},
-    {{"label": "官網流量增幅", "value": "+80%"}},
-    {{"label": "會員總數成長", "value": "+40%"}},
-    {{"label": "廣告平均ROAS", "value": "4.0+"}},
-    {{"label": "會員回購率提升", "value": "+20%"}}
+    {{"label": "KPI名稱1", "value": "+50%"}},
+    {{"label": "KPI名稱2", "value": "+80%"}},
+    {{"label": "KPI名稱3", "value": "+40%"}},
+    {{"label": "KPI名稱4", "value": "4.0+"}},
+    {{"label": "KPI名稱5", "value": "+20%"}}
   ],
   "media_strategy": [
     {{"stage": "認知 (Awareness)", "tools": "媒體工具（逗號分隔）", "message": "溝通核心（20字）"}},
     {{"stage": "考慮 (Consideration)", "tools": "媒體工具", "message": "溝通核心"}},
     {{"stage": "轉換 (Conversion)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "回購 (Retention)", "tools": "媒體工具", "message": "溝通核心"}}
+    {{"stage": "回購/留存 (Retention)", "tools": "媒體工具", "message": "溝通核心"}}
   ],
   "meta_audiences": [
-    {{"name": "核心族群1", "products": "主打商品", "creative": "廣告創意方向（15字）"}},
-    {{"name": "核心族群2", "products": "主打商品", "creative": "廣告創意方向"}},
-    {{"name": "核心族群3", "products": "主打商品", "creative": "廣告創意方向"}}
+    {{"name": "受眾族群1", "products": "主打商品/服務", "creative": "廣告創意方向（15字）"}},
+    {{"name": "受眾族群2", "products": "主打商品/服務", "creative": "廣告創意方向"}},
+    {{"name": "受眾族群3", "products": "主打商品/服務", "creative": "廣告創意方向"}}
   ],
   "google_keywords": [
-    {{"type": "推薦比較類", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "高CTR（點擊率）"}},
-    {{"type": "功效解決類", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "精準需求鎖定"}},
-    {{"type": "品牌防禦類", "keywords": "品牌詞1、品牌詞2", "effect": "守住回購訂單"}}
+    {{"type": "關鍵字類型1", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "效益說明"}},
+    {{"type": "關鍵字類型2", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "效益說明"}},
+    {{"type": "關鍵字類型3", "keywords": "品牌詞1、品牌詞2", "effect": "效益說明"}}
   ],
   "youtube_experts": [
-    {{"role": "營養師／專業人士", "content": "內容方向（20字）"}},
-    {{"role": "醫師／學術背書", "content": "內容方向"}},
-    {{"role": "教練／KOL", "content": "內容方向"}}
+    {{"role": "內容角色1", "content": "內容方向（20字）"}},
+    {{"role": "內容角色2", "content": "內容方向"}},
+    {{"role": "內容角色3", "content": "內容方向"}}
   ],
   "kol_tiers": [
     {{"tier": "Tier 1  大型KOL", "purpose": "流量爆發", "desc": "25字以內說明"}},
     {{"tier": "Tier 2  專業人士", "purpose": "信任轉化", "desc": "25字以內說明"}},
     {{"tier": "Tier 3  微網紅(KOC)", "purpose": "社群擴散", "desc": "25字以內說明"}}
   ],
-  "crm_steps": [
-    {{"day": "Day 0",   "title": "綁定會員",   "desc": "領入會禮券"}},
-    {{"day": "Day 1-7", "title": "產品使用教學", "desc": "建立使用習慣"}},
-    {{"day": "Day 14",  "title": "知識推播",   "desc": "增加品牌黏度"}},
-    {{"day": "Day 25",  "title": "補貨提醒",   "desc": "發放回購優惠券"}},
-    {{"day": "Day 30+", "title": "再次購買",   "desc": "升級會員等級"}}
-  ],
-  "must_buy": ["Meta FB/IG 影音廣告、ASC購物廣告", "Google Search / PMax 效果最大化", "YouTube TrueView 引流", "LINE LAP成效廣告、官方帳號導購"],
-  "bonus_resources": ["健康媒體原生文章合作（早安健康、康健）", "KOL 開箱體驗合作", "Podcast 節目冠名"],
-  "quarterly_plan": [
-    {{"quarter": "Q1  擴大新客", "goal": "衝刺官網新客數", "strategy": "Meta 50% / Google 30% / KOL獲客"}},
-    {{"quarter": "Q2  品牌信任", "goal": "建立搜尋量與好感", "strategy": "YouTube 專家影音 / 內容合作"}},
-    {{"quarter": "Q3  深耕會員", "goal": "提高忠誠度與回購", "strategy": "LINE CRM 自動化 / APP推播"}},
-    {{"quarter": "Q4  業績爆發", "goal": "雙11與年終節慶爆發", "strategy": "PMax拉高 / 再行銷全開 / 團購KOL"}}
-  ],
-  "closing_message": "結語（80字以內，說明品牌需從買流量升級為全漏斗成長模式，強調品牌資產+會員資產）"
-}}"""
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-    )
-    return json.loads(response.choices[0].message.content)
-
-
-async def _generate_content_b2b_biotech(body: ProposalRequest) -> dict:
-    services_str = "、".join(body.services)
-    special = f"\n特殊需求：{body.special_notes}" if body.special_notes else ""
-    budget_num = re.sub(r"[^\d]", "", body.monthly_budget) or "500"
-
-    prompt = f"""你是潮網科技的資深 B2B 生技產業數位行銷顧問，請根據以下資訊生成生技/製藥媒體提案內容（繁體中文）。
-
-客戶：{body.client_name} | 產業：{body.industry}
-年度預算：{budget_num}萬 | 主推服務：{services_str}
-公司現況：{body.current_situation}{special}
-
-輸出嚴格 JSON（根據客戶生技產業特性調整所有內容，聚焦 B2B 決策者導向行銷）：
-
-{{
-  "subtitle": "副標題（20字內，描述技術商業化方向）",
-  "tech_highlights": ["技術亮點1", "技術亮點2", "技術亮點3"],
-  "business_model": "商業模式說明（40字內，說明授權/合作/直銷等模式）",
-  "market_problems": [
-    {{"title": "痛點標題1", "desc": "市場痛點說明（30字內）"}},
-    {{"title": "痛點標題2", "desc": "市場痛點說明"}},
-    {{"title": "痛點標題3", "desc": "市場痛點說明"}}
-  ],
-  "challenges": [
-    {{"title": "挑戰標題1", "desc": "說明（30字內）"}},
-    {{"title": "挑戰標題2", "desc": "說明"}},
-    {{"title": "挑戰標題3", "desc": "說明"}}
-  ],
-  "kpis": [
-    {{"label": "潛在合作夥伴接觸數", "value": "+50%"}},
-    {{"label": "官網專業流量", "value": "+80%"}},
-    {{"label": "LinkedIn 觸及決策者", "value": "+60%"}},
-    {{"label": "展會潛客數", "value": "+40%"}},
-    {{"label": "內容下載轉換率", "value": "+30%"}}
-  ],
-  "b2b_journey": [
-    {{"stage": "Awareness", "action": "認知建立", "desc": "說明（20字）"}},
-    {{"stage": "Consideration", "action": "評估考量", "desc": "說明（20字）"}},
-    {{"stage": "Validation", "action": "技術驗證", "desc": "說明（20字）"}},
-    {{"stage": "Decision", "action": "合作決策", "desc": "說明（20字）"}}
-  ],
-  "media_strategy": [
-    {{"stage": "認知 (Awareness)", "tools": "媒體工具", "message": "溝通核心（20字）"}},
-    {{"stage": "考慮 (Consideration)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "驗證 (Validation)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "決策 (Decision)", "tools": "媒體工具", "message": "溝通核心"}}
-  ],
   "linkedin_targeting": {{
-    "roles": ["職稱1", "職稱2", "職稱3"],
-    "companies": ["公司類型1", "公司類型2"],
+    "roles": ["目標職稱1", "目標職稱2", "目標職稱3"],
+    "companies": ["目標公司類型1", "目標公司類型2"],
     "ad_formats": ["廣告形式1", "廣告形式2"]
   }},
   "seo_keywords": [
-    {{"type": "技術解決方案", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
-    {{"type": "法規合規", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
-    {{"type": "品牌防禦", "keywords": "品牌詞1、品牌詞2", "intent": "品牌認知"}}
+    {{"type": "SEO類型1", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
+    {{"type": "SEO類型2", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
+    {{"type": "SEO類型3", "keywords": "品牌詞1、品牌詞2", "intent": "品牌認知"}}
   ],
   "thought_leadership": [
-    {{"format": "白皮書/研究報告", "topic": "主題（20字）", "goal": "目標（15字）"}},
-    {{"format": "網路研討會/Webinar", "topic": "主題", "goal": "目標"}},
-    {{"format": "專業媒體投稿", "topic": "主題", "goal": "目標"}}
+    {{"format": "內容形式1", "topic": "主題（20字）", "goal": "目標（15字）"}},
+    {{"format": "內容形式2", "topic": "主題", "goal": "目標"}},
+    {{"format": "內容形式3", "topic": "主題", "goal": "目標"}}
   ],
   "events": [
-    {{"name": "展會名稱1", "strategy": "參展策略", "tactic": "具體戰術"}},
-    {{"name": "展會名稱2", "strategy": "參展策略", "tactic": "具體戰術"}}
+    {{"name": "活動/展會名稱1", "strategy": "參與策略", "tactic": "具體戰術"}},
+    {{"name": "活動/展會名稱2", "strategy": "參與策略", "tactic": "具體戰術"}}
+  ],
+  "crm_steps": [
+    {{"day": "Day 0",   "title": "初始接觸",   "desc": "行動說明"}},
+    {{"day": "Day 1-7", "title": "培育互動",   "desc": "行動說明"}},
+    {{"day": "Day 14",  "title": "深化關係",   "desc": "行動說明"}},
+    {{"day": "Day 25",  "title": "促進轉換",   "desc": "行動說明"}},
+    {{"day": "Day 30+", "title": "持續回購/合作", "desc": "行動說明"}}
   ],
   "content_assets": [
-    {{"type": "技術白皮書", "desc": "說明（25字）"}},
-    {{"type": "案例研究", "desc": "說明"}},
-    {{"type": "產品規格書", "desc": "說明"}}
+    {{"type": "內容資產類型1", "desc": "說明（25字）"}},
+    {{"type": "內容資產類型2", "desc": "說明"}},
+    {{"type": "內容資產類型3", "desc": "說明"}}
   ],
-  "must_buy": ["LinkedIn 決策者廣告 (Sponsored Content + InMail)", "Google Search 技術關鍵字廣告", "生技專業媒體原生廣告", "會展現場數位廣告"],
-  "bonus_resources": ["Podcast 生技產業節目冠名", "學術研討會數位贊助", "Geo-fencing 展場精準投放"],
+  "must_buy": ["必購媒體1", "必購媒體2", "必購媒體3", "必購媒體4"],
+  "bonus_resources": ["加值資源1", "加值資源2", "加值資源3"],
   "quarterly_plan": [
-    {{"quarter": "Q1  品牌建立", "goal": "建立專業品牌形象", "strategy": "LinkedIn + 內容行銷 + 官網優化"}},
-    {{"quarter": "Q2  潛客開發", "goal": "觸及目標決策者", "strategy": "ABM 廣告 + 白皮書下載 + Webinar"}},
-    {{"quarter": "Q3  關係深化", "goal": "推進合作商談", "strategy": "案例研究 + 個人化 Email + 展會"}},
-    {{"quarter": "Q4  合作轉化", "goal": "促成合作協議", "strategy": "決策者再行銷 + ROI 報告 + 媒體公關"}}
+    {{"quarter": "Q1  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q2  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q3  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q4  策略方向", "goal": "目標說明", "strategy": "執行策略"}}
   ],
-  "closing_message": "結語（80字以內，說明生技品牌需建立專業信任度並精準觸及決策者，強調科學驗證+商業價值的整合溝通策略）"
+  "closing_message": "結語（80字以內，說明整合行銷策略的核心價值與預期成效）"
 }}"""
 
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -1083,10 +1011,7 @@ def _build_pptx(content: dict, body: ProposalRequest) -> bytes:
     prs.slide_height = int(Inches(7.5))
     layout = prs.slide_layouts[6]  # blank
 
-    if body.client_type == "b2b_biotech":
-        _build_pptx_b2b_biotech(prs, layout, content, body, budget_num)
-    else:
-        _build_pptx_b2c(prs, layout, content, body, budget_num)
+    _build_pptx_unified(prs, layout, content, body, budget_num)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -1220,3 +1145,46 @@ def _build_pptx_b2b_biotech(prs, layout, content: dict, body: ProposalRequest, b
 
     # Slide 16: Closing
     _slide_b2b_closing(prs, layout, client_name, content.get("closing_message", ""), year)
+
+
+def _build_pptx_unified(prs, layout, content: dict, body: ProposalRequest, budget_num: int):
+    year = body.year
+    client_name = body.client_name
+
+    budget_rows = [
+        ("Meta FB/IG 廣告",   "30%", f"{int(budget_num*0.30)}"),
+        ("Google Ads / PMax", "20%", f"{int(budget_num*0.20)}"),
+        ("YouTube 影音",       "10%", f"{int(budget_num*0.10)}"),
+        ("LinkedIn 廣告",     "15%", f"{int(budget_num*0.15)}"),
+        ("LINE CRM / LAP",    "10%", f"{int(budget_num*0.10)}"),
+        ("KOL / 內容行銷",    "10%", f"{int(budget_num*0.10)}"),
+        ("展會 / 研討會",      "5%",  f"{int(budget_num*0.05)}"),
+    ]
+    budget_note = (
+        "Meta + Google 主力效果媒體，覆蓋消費者全旅程。"
+        "LinkedIn 精準觸及 B2B 決策者。"
+        "KOL + 內容行銷建立品牌信任。"
+        "LINE CRM 強化回購與客戶留存。"
+    )
+
+    _slide_cover(prs, layout, client_name, content.get("subtitle", ""), year)
+    _slide_brand(prs, layout, content.get("brand_strengths", []), content.get("brand_d2c", ""))
+    _slide_market(prs, layout, content.get("market_segments", []), year)
+    _slide_problems(prs, layout, content.get("problems", []))
+    _slide_kpis(prs, layout, content.get("kpis", []), year)
+    _slide_funnel(prs, layout)
+    _slide_strategy(prs, layout, content.get("media_strategy", []))
+    _slide_budget(prs, layout, budget_rows, str(budget_num), budget_note)
+    _slide_meta(prs, layout, content.get("meta_audiences", []))
+    _slide_google(prs, layout, content.get("google_keywords", []))
+    _slide_youtube(prs, layout, content.get("youtube_experts", []))
+    _slide_kol(prs, layout, content.get("kol_tiers", []))
+    _slide_b2b_linkedin(prs, layout, content.get("linkedin_targeting", {}))
+    _slide_b2b_seo(prs, layout, content.get("seo_keywords", []))
+    _slide_b2b_thought_leadership(prs, layout, content.get("thought_leadership", []))
+    _slide_b2b_events(prs, layout, content.get("events", []))
+    _slide_crm(prs, layout, content.get("crm_steps", []))
+    _slide_b2b_content_assets(prs, layout, content.get("content_assets", []))
+    _slide_resources(prs, layout, content.get("must_buy", []), content.get("bonus_resources", []))
+    _slide_quarterly(prs, layout, content.get("quarterly_plan", []))
+    _slide_closing(prs, layout, client_name, content.get("closing_message", ""), year)

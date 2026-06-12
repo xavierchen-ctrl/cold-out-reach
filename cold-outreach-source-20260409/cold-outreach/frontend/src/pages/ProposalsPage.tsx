@@ -279,7 +279,6 @@ function GenerateDialog({
     lead_id: '',
     services: ['廣告投放', 'SEO優化'],
     budget_range: '50-100萬/月',
-    client_type: 'b2c',
     extra_context: '',
     year: new Date().getFullYear() + 1,
   })
@@ -328,7 +327,6 @@ function GenerateDialog({
         lead_id: form.lead_id,
         services: form.services,
         budget_range: form.budget_range,
-        client_type: form.client_type,
         extra_context: extraContext,
         year: form.year,
       })
@@ -380,30 +378,6 @@ function GenerateDialog({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          {/* 客戶類型 */}
-          <div>
-            <Label>客戶類型</Label>
-            <div className="grid grid-cols-2 gap-2 mt-1">
-              {[
-                { value: 'b2c', label: 'B2C 消費者品牌' },
-                { value: 'b2b_biotech', label: 'B2B 生技製藥' },
-              ].map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => setForm(f => ({ ...f, client_type: opt.value }))}
-                  className={`px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
-                    form.client_type === opt.value
-                      ? 'bg-primary/10 border-primary text-primary'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
           </div>
 
           {/* 服務（多選）+ 預算 */}

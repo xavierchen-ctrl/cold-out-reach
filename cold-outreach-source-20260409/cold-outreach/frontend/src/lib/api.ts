@@ -369,7 +369,6 @@ export const generateProposalFromLead = (data: {
   lead_id: string
   services: string[]
   budget_range: string
-  client_type: string
   extra_context?: string
   year?: number
 }) => api.post('/proposal/generate-from-lead', data, { responseType: 'blob' })
