@@ -3,6 +3,7 @@ import json
 import os
 import re
 import httpx
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -76,7 +77,7 @@ async def generate_proposal(
     return StreamingResponse(
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
@@ -173,7 +174,7 @@ async def generate_from_lead(
     return StreamingResponse(
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
