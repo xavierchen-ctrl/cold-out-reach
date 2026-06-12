@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  generateProposalFromLead,
+  generateProposalAI, getProposalJobStatus, downloadProposalJobFile,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -285,7 +285,9 @@ function GenerateDialog({
   const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [downloadingPptx, setDownloadingPptx] = useState(false)
+  const [aiJobId, setAiJobId] = useState<string | null>(null)
+  const [aiStatus, setAiStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [aiMessage, setAiMessage] = useState('')
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -294,11 +296,44 @@ function GenerateDialog({
     })
   }, [])
 
+  // Poll job status
+  useEffect(() => {
+    if (!aiJobId || aiStatus !== 'running') return
+    const timer = setInterval(async () => {
+      try {
+        const res = await getProposalJobStatus(aiJobId)
+        const { status, message } = res.data
+        setAiMessage(message)
+        if (status === 'done') {
+          setAiStatus('done')
+          clearInterval(timer)
+          // Auto-download
+          const fileRes = await downloadProposalJobFile(aiJobId)
+          const selectedLead = leads.find(l => l.id === form.lead_id)
+          const url = window.URL.createObjectURL(new Blob([fileRes.data]))
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${selectedLead?.company_name || '提案'}_${form.year}_媒體提案.pptx`
+          a.click()
+          window.URL.revokeObjectURL(url)
+          setAiJobId(null)
+          setAiStatus('idle')
+        } else if (status === 'error') {
+          setAiStatus('error')
+          clearInterval(timer)
+        }
+      } catch {
+        // keep polling
+      }
+    }, 4000)
+    return () => clearInterval(timer)
+  }, [aiJobId, aiStatus, leads, form.lead_id, form.year])
+
   const filtered = leads.filter(l =>
     l.company_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const busy = generating || downloadingPptx
+  const busy = generating || aiStatus === 'running'
 
   const handleContextFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     Array.from(e.target.files || []).forEach(file => {
@@ -315,38 +350,25 @@ function GenerateDialog({
 
   const handleDownloadPptx = async () => {
     if (!form.lead_id) return
-    setDownloadingPptx(true)
+    let extraContext = form.extra_context
+    for (const cf of contextFiles.filter(cf => !cf.preview)) {
+      const text = await cf.file.text()
+      extraContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
+    }
     try {
-      let extraContext = form.extra_context
-      for (const cf of contextFiles.filter(cf => !cf.preview)) {
-        const text = await cf.file.text()
-        extraContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
-      }
-
-      const res = await generateProposalFromLead({
+      setAiStatus('running')
+      setAiMessage('已加入佇列，即將開始...')
+      const res = await generateProposalAI({
         lead_id: form.lead_id,
         services: form.services,
         budget_range: form.budget_range,
         extra_context: extraContext,
         year: form.year,
       })
-      const url = window.URL.createObjectURL(new Blob([res.data]))
-      const a = document.createElement('a')
-      a.href = url
-      const selectedLead = leads.find(l => l.id === form.lead_id)
-      a.download = `${selectedLead?.company_name || '提案'}_${form.year}_媒體提案.pptx`
-      a.click()
-      window.URL.revokeObjectURL(url)
+      setAiJobId(res.data.job_id)
     } catch (err: unknown) {
-      const text = await (err as { response?: { data?: Blob } })?.response?.data?.text?.()
-      try {
-        const json = JSON.parse(text || '{}')
-        alert(`下載失敗：${json.detail || String(err)}`)
-      } catch {
-        alert(`下載失敗，請稍後再試`)
-      }
-    } finally {
-      setDownloadingPptx(false)
+      setAiStatus('error')
+      setAiMessage('啟動失敗，請稍後再試')
     }
   }
 
@@ -478,13 +500,31 @@ function GenerateDialog({
             )}
           </div>
 
+          {/* AI 進度提示 */}
+          {aiStatus === 'running' && (
+            <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 flex items-start gap-3">
+              <Loader2 className="w-5 h-5 text-blue-500 animate-spin mt-0.5 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-blue-800">ChatGPT 正在設計您的簡報</p>
+                <p className="text-xs text-blue-600 mt-0.5">{aiMessage}</p>
+                <p className="text-xs text-blue-400 mt-1">預計需要 2-4 分鐘，請勿關閉此視窗</p>
+              </div>
+            </div>
+          )}
+          {aiStatus === 'error' && (
+            <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+              ⚠️ {aiMessage}
+              <button className="ml-2 underline text-xs" onClick={() => setAiStatus('idle')}>重試</button>
+            </div>
+          )}
+
           {/* 操作按鈕 */}
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
             <Button onClick={handleDownloadPptx} disabled={!form.lead_id || form.services.length === 0 || busy}>
-              {downloadingPptx
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />AI 生成中，約需 30 秒...</>
-                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（16頁）</>}
+              {aiStatus === 'running'
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />ChatGPT 設計中...</>
+                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（AI 設計）</>}
             </Button>
           </div>
         </div>

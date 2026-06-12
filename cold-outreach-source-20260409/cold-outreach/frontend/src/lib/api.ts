@@ -373,6 +373,20 @@ export const generateProposalFromLead = (data: {
   year?: number
 }) => api.post('/proposal/generate-from-lead', data, { responseType: 'blob' })
 
+export const generateProposalAI = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/generate-ai-from-lead', data)
+
+export const getProposalJobStatus = (jobId: string) =>
+  api.get(`/proposal/job/${jobId}`)
+
+export const downloadProposalJobFile = (jobId: string) =>
+  api.get(`/proposal/job/${jobId}/file`, { responseType: 'blob' })
+
 // ── 名單審核 ──────────────────────────────────────────────────────────────────
 export const getLeadApprovals = () => api.get('/approvals/leads')
 export const getLeadApprovalCount = () => api.get('/approvals/leads/pending-count')

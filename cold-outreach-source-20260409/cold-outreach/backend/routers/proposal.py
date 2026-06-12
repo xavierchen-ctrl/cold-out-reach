@@ -1,8 +1,12 @@
+import asyncio
 import io
 import json
 import os
 import re
+import time
+import uuid
 import httpx
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -16,6 +20,11 @@ from models import User, Lead
 
 router = APIRouter(prefix="/api/proposal", tags=["proposal"])
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# ── Assistants API job store ───────────────────────────────────────────────────
+_jobs: dict = {}          # job_id → {status, message, bytes, filename, created_at}
+_executor = ThreadPoolExecutor(max_workers=3)
+_assistant_id: str | None = None
 
 _HTTP_HEADERS = {
     "User-Agent": (
@@ -95,6 +104,237 @@ _BUDGET_MAP = {
     "50-100萬/月": "100",
     "100萬以上/月": "150",
 }
+
+
+def _get_or_create_assistant(client: OpenAI) -> str:
+    global _assistant_id
+    if _assistant_id:
+        try:
+            client.beta.assistants.retrieve(_assistant_id)
+            return _assistant_id
+        except Exception:
+            pass
+    assistant = client.beta.assistants.create(
+        name="潮網科技 提案設計師",
+        instructions=(
+            "你是潮網科技的資深數位行銷顧問兼專業簡報設計師。"
+            "當收到提案要求時，請用 python-pptx 製作視覺豐富、每頁版面皆不同的專業簡報。"
+            "程式碼必須完整可執行，存檔路徑為 /tmp/proposal.pptx。"
+        ),
+        tools=[{"type": "code_interpreter"}],
+        model="gpt-4o",
+    )
+    _assistant_id = assistant.id
+    return _assistant_id
+
+
+def _build_assistants_prompt(client_name: str, industry: str, budget: str,
+                              services: str, current_situation: str, year: int) -> str:
+    return f"""你是潮網科技的資深數位行銷顧問兼專業簡報設計師。
+
+【客戶資訊】
+客戶名稱：{client_name}
+產業：{industry}
+月預算：{budget}萬
+主推服務：{services}
+品牌現況：{current_situation}
+
+請完成以下任務：
+1. 根據客戶資訊生成完整的媒體提案內容（繁體中文）
+2. 用 python-pptx 製作一份專業的 {year} 年度數位行銷媒體提案 PowerPoint（16頁）
+3. 存檔為 /tmp/proposal.pptx
+
+【技術規格】
+- 簡報尺寸：13.33 英吋 × 7.5 英吋（16:9）
+- python-pptx 1.0.x：所有 EMU 值必須用 int() 轉換，shp.line.width = 0 表示無邊框
+- 使用 Presentation()、slide_layouts[6]（空白版型）
+
+【設計要求】
+- 每頁使用不同的版面佈局（嚴禁每頁設計相同）
+- 主色系：深藍 RGB(27,58,107) + 橘色 RGB(245,124,0) + 白色
+- 每頁都要有色塊、標題、內容；善用對角切版、左右分欄、卡片格狀等設計
+- 重要數據用大字號突出顯示
+- 所有文字使用繁體中文
+
+【頁面結構】
+第1頁：封面 — 深藍背景、客戶名稱大標、「{year} 年度數位行銷媒體提案」副標、潮網科技
+第2頁：品牌現況分析 — 3個優勢 + 現況說明
+第3頁：目標客群分析 — 3個族群卡片（年齡、需求、決策關鍵）
+第4頁：行銷問題診斷 — 3個問題診斷卡片
+第5頁：年度 KPI 目標 — 5個指標，大數字視覺化
+第6頁：全漏斗媒體策略 — Awareness → Consideration → Conversion → Retention 流程
+第7頁：整合媒體策略總表 — 表格（漏斗階段 / 媒體工具 / 溝通核心）
+第8頁：預算配置 — 條狀圖（Meta 30%、Google 20%、YouTube 10%、LinkedIn 15%、LINE 10%、KOL 10%、展會 5%）
+第9頁：Meta/Facebook/Instagram 廣告策略 — 3個受眾族群
+第10頁：Google/SEO 策略 — 3種關鍵字類型
+第11頁：YouTube 影音策略 — 3種內容角色
+第12頁：KOL/網紅行銷規劃 — Tier 1/2/3 三層架構
+第13頁：LinkedIn B2B 策略 — 目標職稱、廣告形式
+第14頁：LINE CRM 會員旅程 — Day 0 到 Day 30+ 時間軸
+第15頁：季度執行計畫 — Q1~Q4 橫向時程表
+第16頁：結語 — 深藍背景、總結訊息、下一步行動
+
+請直接撰寫並執行完整的 Python 程式碼（無需解釋），確認 /tmp/proposal.pptx 已成功儲存。"""
+
+
+def _do_assistants_job(job_id: str, prompt: str, filename: str) -> None:
+    try:
+        _jobs[job_id].update(status="running", message="AI 正在初始化...")
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        assistant_id = _get_or_create_assistant(client)
+
+        thread = client.beta.threads.create()
+        client.beta.threads.messages.create(
+            thread_id=thread.id, role="user", content=prompt
+        )
+
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id, assistant_id=assistant_id
+        )
+
+        # Poll with status updates
+        while run.status in ("queued", "in_progress", "cancelling"):
+            time.sleep(6)
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread.id, run_id=run.id
+            )
+            status_map = {
+                "queued": "AI 正在排隊中...",
+                "in_progress": "AI 正在撰寫程式碼並設計簡報，請稍候...",
+                "cancelling": "正在取消...",
+            }
+            _jobs[job_id]["message"] = status_map.get(run.status, run.status)
+
+        if run.status != "completed":
+            last_error = getattr(run, "last_error", None)
+            err_msg = str(last_error) if last_error else run.status
+            _jobs[job_id].update(status="error", message=f"生成失敗：{err_msg}")
+            return
+
+        # Find the PPTX file attachment
+        messages = client.beta.threads.messages.list(thread_id=thread.id)
+        pptx_bytes = None
+        for msg in messages.data:
+            if msg.role != "assistant":
+                continue
+            for attachment in (getattr(msg, "attachments", None) or []):
+                fid = getattr(attachment, "file_id", None)
+                if fid:
+                    pptx_bytes = client.files.content(fid).read()
+                    break
+            if pptx_bytes:
+                break
+
+        if not pptx_bytes:
+            _jobs[job_id].update(status="error", message="找不到生成的 PPTX 檔案，請重試")
+            return
+
+        _jobs[job_id].update(
+            status="done",
+            message="簡報已完成！",
+            pptx_bytes=pptx_bytes,
+            filename=filename,
+            done_at=time.time(),
+        )
+
+    except Exception as e:
+        _jobs[job_id].update(status="error", message=str(e))
+
+
+@router.post("/generate-ai-from-lead")
+async def generate_ai_from_lead(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    # Scrape website for context
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=_HTTP_HEADERS) as hc:
+                res = await hc.get(url)
+                website_summary = _strip_tags(res.text)[:1500]
+        except Exception:
+            pass
+
+    # Build current_situation
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+
+    parts = []
+    if lead.industry:   parts.append(f"產業：{lead.industry}")
+    if lead.company_size: parts.append(f"規模：{lead.company_size}")
+    if lead.city:       parts.append(f"城市：{lead.city}")
+    if tech_str:        parts.append(f"數位工具：{tech_str}")
+    if ad_str:          parts.append(f"廣告現況：{ad_str}")
+    if website_summary: parts.append(f"官網：{website_summary}")
+    if body.extra_context.strip(): parts.append(f"補充：{body.extra_context.strip()}")
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    services_str = "、".join(body.services)
+    prompt = _build_assistants_prompt(
+        client_name=lead.company_name,
+        industry=lead.industry or "未知",
+        budget=monthly_budget,
+        services=services_str,
+        current_situation=current_situation,
+        year=body.year,
+    )
+
+    job_id = str(uuid.uuid4())
+    filename = f"{lead.company_name}_{body.year}_媒體提案.pptx"
+    _jobs[job_id] = {
+        "status": "queued",
+        "message": "已加入佇列，即將開始...",
+        "filename": filename,
+        "created_at": time.time(),
+    }
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _do_assistants_job, job_id, prompt, filename)
+
+    return {"job_id": job_id}
+
+
+@router.get("/job/{job_id}")
+async def get_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": job["status"], "message": job["message"]}
+
+
+@router.get("/job/{job_id}/file")
+async def download_job_file(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(status_code=404, detail="File not ready")
+    pptx_bytes = job["pptx_bytes"]
+    filename = job["filename"]
+    _jobs.pop(job_id, None)
+    return StreamingResponse(
+        io.BytesIO(pptx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
 
 
 @router.post("/generate-from-lead")
