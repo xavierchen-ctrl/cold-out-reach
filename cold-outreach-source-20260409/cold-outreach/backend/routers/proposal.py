@@ -241,6 +241,89 @@ def _do_assistants_job(job_id: str, prompt: str, filename: str) -> None:
         _jobs[job_id].update(status="error", message=str(e))
 
 
+@router.post("/chatgpt-prompt")
+async def get_chatgpt_prompt(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=6, follow_redirects=True, headers=_HTTP_HEADERS) as hc:
+                res = await hc.get(url)
+                website_summary = _strip_tags(res.text)[:1000]
+        except Exception:
+            pass
+
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+
+    parts = []
+    if lead.industry:      parts.append(f"產業：{lead.industry}")
+    if lead.company_size:  parts.append(f"規模：{lead.company_size}")
+    if lead.city:          parts.append(f"城市：{lead.city}")
+    if tech_str:           parts.append(f"數位工具：{tech_str}")
+    if ad_str:             parts.append(f"廣告現況：{ad_str}")
+    if website_summary:    parts.append(f"官網：{website_summary}")
+    if body.extra_context.strip(): parts.append(f"補充：{body.extra_context.strip()}")
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    services_str = "、".join(body.services)
+    prompt = f"""請幫我製作一份專業的數位行銷媒體提案 PowerPoint（使用 Code Interpreter 產生可下載的 .pptx 檔案）。
+
+【客戶資訊】
+客戶名稱：{lead.company_name}
+產業：{lead.industry or "未知"}
+月預算：{monthly_budget}萬
+主推服務：{services_str}
+品牌現況：
+{current_situation}
+
+【技術規格】
+- 簡報尺寸：13.33 英吋 × 7.5 英吋（16:9 寬螢幕）
+- python-pptx 1.0.x（所有 EMU 值需用 int() 轉換）
+- 語言：繁體中文
+
+【設計要求】
+- 共 16 頁，每頁版面設計各不相同（嚴禁每頁都一樣）
+- 主色系：深藍 #1B3A6B + 橘色 #F57C00 + 白色
+- 善用色塊組合、對角線切版、左右分欄、卡片格狀等設計
+- 重要數據請用大字號突出顯示
+- 每頁都要有視覺層次感
+
+【頁面結構】
+第1頁：封面 — 深藍背景、客戶名稱大標、「{body.year} 年度數位行銷媒體提案」、潮網科技
+第2頁：品牌現況分析 — 3個優勢 + 現況說明
+第3頁：目標客群分析 — 3個族群卡片（年齡區間、需求、決策關鍵）
+第4頁：行銷問題診斷 — 3個問題，診斷卡片設計
+第5頁：年度 KPI 目標 — 5個指標，大數字視覺化
+第6頁：全漏斗媒體策略 — Awareness → Consideration → Conversion → Retention 流程圖
+第7頁：整合媒體策略總表 — 表格（漏斗階段 / 媒體工具 / 溝通核心）
+第8頁：預算配置 — 橫向條狀圖（Meta 30%、Google 20%、YouTube 10%、LinkedIn 15%、LINE 10%、KOL 10%、展會 5%）
+第9頁：Meta / Facebook / Instagram 廣告策略 — 3個受眾族群
+第10頁：Google / SEO 策略 — 3種關鍵字類型
+第11頁：YouTube 影音策略 — 3種內容角色
+第12頁：KOL / 網紅行銷規劃 — Tier 1 / 2 / 3 三層架構
+第13頁：LinkedIn B2B 策略 — 目標職稱與廣告形式
+第14頁：LINE CRM 會員旅程 — Day 0 到 Day 30+ 時間軸
+第15頁：季度執行計畫 — Q1～Q4 橫向時程表
+第16頁：結語 — 深藍背景、總結訊息、下一步行動建議
+
+請產生完整可下載的 PPTX 檔案。"""
+
+    return {"prompt": prompt}
+
+
 @router.post("/generate-ai-from-lead")
 async def generate_ai_from_lead(
     body: GenerateFromLeadRequest,

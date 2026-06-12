@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   getProposals, generateProposal, deleteProposal, updateProposal, getLeads, exportProposalPptx,
   listProposalTemplates, uploadProposalTemplate, activateProposalTemplate, deleteProposalTemplate,
-  generateProposalAI, getProposalJobStatus, downloadProposalJobFile,
+  generateChatGptPrompt,
 } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -285,9 +285,8 @@ function GenerateDialog({
   const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
   const [generating, setGenerating] = useState(false)
-  const [aiJobId, setAiJobId] = useState<string | null>(null)
-  const [aiStatus, setAiStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
-  const [aiMessage, setAiMessage] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [promptCopied, setPromptCopied] = useState(false)
 
   useEffect(() => {
     getLeads({ limit: 200 }).then(r => {
@@ -296,44 +295,11 @@ function GenerateDialog({
     })
   }, [])
 
-  // Poll job status
-  useEffect(() => {
-    if (!aiJobId || aiStatus !== 'running') return
-    const timer = setInterval(async () => {
-      try {
-        const res = await getProposalJobStatus(aiJobId)
-        const { status, message } = res.data
-        setAiMessage(message)
-        if (status === 'done') {
-          setAiStatus('done')
-          clearInterval(timer)
-          // Auto-download
-          const fileRes = await downloadProposalJobFile(aiJobId)
-          const selectedLead = leads.find(l => l.id === form.lead_id)
-          const url = window.URL.createObjectURL(new Blob([fileRes.data]))
-          const a = document.createElement('a')
-          a.href = url
-          a.download = `${selectedLead?.company_name || '提案'}_${form.year}_媒體提案.pptx`
-          a.click()
-          window.URL.revokeObjectURL(url)
-          setAiJobId(null)
-          setAiStatus('idle')
-        } else if (status === 'error') {
-          setAiStatus('error')
-          clearInterval(timer)
-        }
-      } catch {
-        // keep polling
-      }
-    }, 4000)
-    return () => clearInterval(timer)
-  }, [aiJobId, aiStatus, leads, form.lead_id, form.year])
-
   const filtered = leads.filter(l =>
     l.company_name.toLowerCase().includes(search.toLowerCase())
   )
 
-  const busy = generating || aiStatus === 'running'
+  const busy = generating || promptLoading
 
   const handleContextFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
     Array.from(e.target.files || []).forEach(file => {
@@ -348,27 +314,29 @@ function GenerateDialog({
     e.target.value = ''
   }
 
-  const handleDownloadPptx = async () => {
+  const handleCopyPrompt = async () => {
     if (!form.lead_id) return
     let extraContext = form.extra_context
     for (const cf of contextFiles.filter(cf => !cf.preview)) {
       const text = await cf.file.text()
       extraContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
     }
+    setPromptLoading(true)
     try {
-      setAiStatus('running')
-      setAiMessage('已加入佇列，即將開始...')
-      const res = await generateProposalAI({
+      const res = await generateChatGptPrompt({
         lead_id: form.lead_id,
         services: form.services,
         budget_range: form.budget_range,
         extra_context: extraContext,
         year: form.year,
       })
-      setAiJobId(res.data.job_id)
-    } catch (err: unknown) {
-      setAiStatus('error')
-      setAiMessage('啟動失敗，請稍後再試')
+      await navigator.clipboard.writeText(res.data.prompt)
+      setPromptCopied(true)
+      setTimeout(() => setPromptCopied(false), 8000)
+    } catch {
+      alert('無法取得提示詞，請稍後再試')
+    } finally {
+      setPromptLoading(false)
     }
   }
 
@@ -500,31 +468,36 @@ function GenerateDialog({
             )}
           </div>
 
-          {/* AI 進度提示 */}
-          {aiStatus === 'running' && (
-            <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 flex items-start gap-3">
-              <Loader2 className="w-5 h-5 text-blue-500 animate-spin mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-blue-800">ChatGPT 正在設計您的簡報</p>
-                <p className="text-xs text-blue-600 mt-0.5">{aiMessage}</p>
-                <p className="text-xs text-blue-400 mt-1">預計需要 2-4 分鐘，請勿關閉此視窗</p>
+          {/* 複製成功提示 */}
+          {promptCopied && (
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCheck className="w-4 h-4 text-green-600 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-green-800">提示詞已複製到剪貼簿！</p>
+                  <p className="text-xs text-green-600 mt-0.5">開啟 ChatGPT → 貼上 → 送出，即可產生 PPTX</p>
+                </div>
               </div>
-            </div>
-          )}
-          {aiStatus === 'error' && (
-            <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-              ⚠️ {aiMessage}
-              <button className="ml-2 underline text-xs" onClick={() => setAiStatus('idle')}>重試</button>
+              <a
+                href="https://chatgpt.com"
+                target="_blank"
+                rel="noreferrer"
+                className="ml-3 shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+              >
+                開啟 ChatGPT →
+              </a>
             </div>
           )}
 
           {/* 操作按鈕 */}
           <div className="flex justify-end gap-2 border-t pt-3">
             <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
-            <Button onClick={handleDownloadPptx} disabled={!form.lead_id || form.services.length === 0 || busy}>
-              {aiStatus === 'running'
-                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />ChatGPT 設計中...</>
-                : <><Download className="w-4 h-4 mr-1.5" />下載 PPTX（AI 設計）</>}
+            <Button onClick={handleCopyPrompt} disabled={!form.lead_id || form.services.length === 0 || busy}>
+              {promptLoading
+                ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />整理客戶資料中...</>
+                : promptCopied
+                ? <><CheckCheck className="w-4 h-4 mr-1.5" />已複製！再次複製</>
+                : <><Copy className="w-4 h-4 mr-1.5" />複製 ChatGPT 提示詞</>}
             </Button>
           </div>
         </div>

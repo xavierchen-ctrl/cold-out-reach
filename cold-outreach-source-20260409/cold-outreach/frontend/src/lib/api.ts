@@ -373,6 +373,14 @@ export const generateProposalFromLead = (data: {
   year?: number
 }) => api.post('/proposal/generate-from-lead', data, { responseType: 'blob' })
 
+export const generateChatGptPrompt = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/chatgpt-prompt', data)
+
 export const generateProposalAI = (data: {
   lead_id: string
   services: string[]
