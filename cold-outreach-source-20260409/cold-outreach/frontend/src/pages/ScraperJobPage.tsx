@@ -181,11 +181,11 @@ export default function ScraperJobPage() {
                 ) : (
                   <>
                     <th className="py-3 px-4">公司資訊</th>
-                    <th className="py-3 px-4 hidden sm:table-cell w-48">網址</th>
-                    <th className="py-3 px-4">聯絡人</th>
-                    <th className="py-3 px-4 hidden md:table-cell w-36">地理/產業</th>
                     <th className="py-3 px-4 hidden lg:table-cell w-40">電話</th>
+                    <th className="py-3 px-4">聯絡人</th>
+                    <th className="py-3 px-4 hidden sm:table-cell w-48">網址</th>
                     <th className="py-3 px-4 hidden lg:table-cell w-48">Email</th>
+                    <th className="py-3 px-4 hidden md:table-cell w-36">產業/地理</th>
                   </>
                 )}
               </tr>
@@ -266,6 +266,40 @@ export default function ScraperJobPage() {
                           </div>
                         </td>
 
+                        <td className="py-2 px-4 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
+                          {c.phone ? (
+                            <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
+                              <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
+                            </div>
+                          ) : findingPhone.has(idx) ? (
+                            <span className="flex items-center gap-1 text-xs text-gray-400">
+                              <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleFindPhone(idx, c.company_name)}
+                              className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                              title="自動搜尋電話並帶入"
+                            >
+                              <Search className="w-3 h-3" /> 查找電話
+                            </button>
+                          )}
+                        </td>
+
+                        <td className="py-2 px-4">
+                          {c.contact_name ? (
+                            <div className="flex items-start gap-2">
+                              <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                              <div>
+                                <p className="font-medium text-gray-800">{c.contact_name}</p>
+                                {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-400 italic">— 無 —</span>
+                          )}
+                        </td>
+
                         <td className="py-2 px-4 hidden sm:table-cell" onClick={e => e.stopPropagation()}>
                           {c.website ? (
                             <a
@@ -291,17 +325,13 @@ export default function ScraperJobPage() {
                           )}
                         </td>
 
-                        <td className="py-2 px-4">
-                          {c.contact_name ? (
-                            <div className="flex items-start gap-2">
-                              <UserCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                              <div>
-                                <p className="font-medium text-gray-800">{c.contact_name}</p>
-                                {c.title && <p className="text-xs text-gray-500">{c.title}</p>}
-                              </div>
+                        <td className="py-2 px-4 hidden lg:table-cell">
+                          {c.email ? (
+                            <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
+                              <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
                             </div>
                           ) : (
-                            <span className="text-xs text-gray-400 italic">— 無 —</span>
+                            <span className="text-xs text-gray-300">—</span>
                           )}
                         </td>
 
@@ -318,36 +348,6 @@ export default function ScraperJobPage() {
                               </div>
                             )}
                           </div>
-                        </td>
-
-                        <td className="py-2 px-4 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
-                          {c.phone ? (
-                            <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
-                              <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
-                            </div>
-                          ) : findingPhone.has(idx) ? (
-                            <span className="flex items-center gap-1 text-xs text-gray-400">
-                              <Loader2 className="w-3 h-3 animate-spin" /> 搜尋中...
-                            </span>
-                          ) : (
-                            <button
-                              onClick={() => handleFindPhone(idx, c.company_name)}
-                              className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
-                              title="自動搜尋電話並帶入"
-                            >
-                              <Search className="w-3 h-3" /> 查找電話
-                            </button>
-                          )}
-                        </td>
-
-                        <td className="py-2 px-4 hidden lg:table-cell">
-                          {c.email ? (
-                            <div className="flex items-center gap-1.5 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded w-fit max-w-[200px] truncate">
-                              <Mail className="w-3.5 h-3.5 shrink-0" /> {c.email}
-                            </div>
-                          ) : (
-                            <span className="text-xs text-gray-300">—</span>
-                          )}
                         </td>
                       </>
                     )}
