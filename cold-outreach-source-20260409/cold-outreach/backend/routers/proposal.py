@@ -279,6 +279,37 @@ async def get_chatgpt_prompt(
     current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
 
     services_str = "、".join(body.services)
+
+    budget_int = int(monthly_budget)
+    if budget_int <= 30:
+        budget_guidance = """【預算策略指引 — 小預算（30萬以下）】
+月預算有限，建議聚焦 2-3 個核心管道，不宜分散：
+- 必選：Meta FB/IG 廣告（品牌+效果兼顧）、Google Search（捕捉主動需求）
+- 可視情況加入：LINE OA 基礎經營
+- 暫緩：YouTube 大規模投放、KOL、LinkedIn、展會（等預算擴大再納入）
+- 重點：把有限預算集中在轉換率最高的管道，追求 ROAS 最大化"""
+    elif budget_int <= 50:
+        budget_guidance = """【預算策略指引 — 中小預算（30-50萬）】
+建議 3-4 個管道組合，兼顧品效：
+- 核心：Meta 廣告 + Google Ads
+- 擴充：可加入 KOL 微網紅（口碑擴散）或 LINE CRM（會員經營）擇一
+- 可視需求加：YouTube 短影音（不做大規模投放）
+- 暫緩：LinkedIn、大型展會"""
+    elif budget_int <= 100:
+        budget_guidance = """【預算策略指引 — 中大預算（50-100萬）】
+建議 4-5 個管道全數位整合：
+- 核心：Meta + Google + YouTube 影音廣告
+- 加入：KOL 行銷（口碑+觸及）、LINE CRM 自動化（會員留存）
+- 視產業：若有 B2B 需求可加 LinkedIn 廣告
+- 暫緩：大型展會、Podcast 冠名（除非產業特別適合）"""
+    else:
+        budget_guidance = """【預算策略指引 — 大預算（100萬以上）】
+全管道整合，建立品牌資產與多觸點佈局：
+- 全數位：Meta + Google + YouTube + KOL + LinkedIn + LINE CRM
+- 線下延伸：展會、研討會、Podcast 冠名、媒體原生廣告
+- 重點：各管道設定明確 KPI（品牌曝光 vs 效果轉換），避免預算重疊浪費
+- 建議設立整合儀表板，跨管道歸因分析"""
+
     prompt = f"""請幫我製作一份專業的數位行銷媒體提案 PowerPoint（使用 Code Interpreter 產生可下載的 .pptx 檔案）。
 
 【客戶資訊】
@@ -288,6 +319,8 @@ async def get_chatgpt_prompt(
 主推服務：{services_str}
 品牌現況：
 {current_situation}
+
+{budget_guidance}
 
 【技術規格】
 - 簡報尺寸：13.33 英吋 × 7.5 英吋（16:9 寬螢幕）
@@ -311,7 +344,7 @@ async def get_chatgpt_prompt(
 - 全漏斗媒體策略
 - 整合媒體策略總表
 - 預算配置
-- 各媒體管道策略（Meta、Google、YouTube、KOL、LinkedIn、LINE CRM 等，依預算與服務選項決定要包含哪些）
+- 各媒體管道策略（依上方預算策略指引，只納入適合的管道，每個管道獨立一頁說明策略與執行方式）
 - 季度執行計畫
 - 結語與下一步行動
 
