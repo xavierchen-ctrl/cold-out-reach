@@ -1,9 +1,10 @@
 """591 新成屋爬蟲 - 取得建案名稱、建商、聯絡電話"""
 import asyncio
 import logging
-import random
 import re
-from typing import List
+from typing import List, Tuple
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -28,25 +29,35 @@ _EXCLUDED_DOMAINS = {
     'sinyi.com.tw', 'house.com.tw', 'rakuya.com.tw', 'yungching.com.tw',
 }
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/html, */*",
+    "Accept-Language": "zh-TW,zh;q=0.9,en;q=0.8",
+    "Referer": "https://newhouse.591.com.tw/",
+}
+
 
 def _extract_developer(text: str) -> str:
     """從詳情頁文字中抓建商名稱"""
     m = re.search(
-        r'建設\s*\n\s*'
-        r'([^\n]{1,30}(?:建設|建築|開發|地產|營造|不動產|工程|建業|建屋)[^\n]*)',
+        r'建設\s*[\n\r]+\s*([^\n\r]{1,30}(?:建設|建築|開發|地產|營造|不動產|工程|建業|建屋)[^\n\r]*)',
         text
     )
     if m:
         return m.group(1).strip()
     m2 = re.search(
-        r'建商資料[\s\S]{0,60}?([^\n]{2,30}(?:建設|建築|開發|地產|建業|開發|建商)[^\n]*有限公司[^\n]*)',
+        r'建商資料[\s\S]{0,60}?([^\n]{2,30}(?:建設|建築|開發|地產|建業|建商)[^\n]*有限公司[^\n]*)',
         text
     )
     if m2:
         return m2.group(1).strip()
-    m3 = re.search(r'投資建設\s*\n+\s*([^\n]{3,35}(?:股份有限公司|有限公司)[^\n]*)', text)
+    m3 = re.search(r'投資建設\s*[\n\r]+\s*([^\n\r]{3,35}(?:股份有限公司|有限公司)[^\n\r]*)', text)
     if m3:
         return m3.group(1).strip()
+    # 嘗試 JSON-LD 或 meta 裡的 build_company
+    m4 = re.search(r'"build_company"\s*:\s*"([^"]{2,40})"', text)
+    if m4:
+        return m4.group(1).strip()
     return ""
 
 
@@ -60,47 +71,45 @@ def _extract_website(html: str) -> str:
     return ""
 
 
-async def _fetch_one_detail(list_page, hid: int, sem: asyncio.Semaphore):
-    """並發抓單筆詳情：先試 JSON API，再試 HTML。回傳 (developer, website)"""
+async def _fetch_detail(client: httpx.AsyncClient, hid: int, sem: asyncio.Semaphore) -> Tuple[str, str]:
+    """並發抓單筆：先試 JSON API，再試 HTML。回傳 (developer, website)"""
     async with sem:
-        developer = ""
-        website = ""
-
-        # 1. 先試 JSON detail API（速度最快）
+        # 1. JSON detail API
         try:
-            resp = await list_page.request.get(
+            resp = await client.get(
                 "https://newhouse.591.com.tw/home/housing/detail",
                 params={"id": str(hid)},
-                timeout=5000,
+                timeout=8,
             )
-            if resp.ok:
-                data = (await resp.json()).get("data", {})
-                developer = (
+            if resp.status_code == 200:
+                data = resp.json().get("data", {})
+                dev = (
                     data.get("build_company") or
                     data.get("developer") or
                     data.get("company_name") or
                     data.get("builder") or ""
                 ).strip()
+                if dev:
+                    return dev, ""
         except Exception:
             pass
 
-        # 2. 若 JSON 沒有建商，抓 HTML 解析
-        if not developer:
-            try:
-                resp = await list_page.request.get(
-                    f"https://newhouse.591.com.tw/{hid}",
-                    timeout=6000,
-                )
-                html = await resp.text()
+        # 2. HTML fallback
+        try:
+            resp = await client.get(
+                f"https://newhouse.591.com.tw/{hid}",
+                timeout=8,
+            )
+            if resp.status_code == 200:
+                html = resp.text
                 plain = re.sub(r'<[^>]+>', ' ', html)
-                developer = _extract_developer(plain)
-                if not website:
-                    website = _extract_website(html)
-            except Exception as e:
-                logger.debug(f"591 detail HTML error hid={hid}: {e}")
+                dev = _extract_developer(plain)
+                website = _extract_website(html)
+                return dev, website
+        except Exception as e:
+            logger.debug(f"591 detail error hid={hid}: {e}")
 
-        await asyncio.sleep(random.uniform(0.05, 0.15))
-        return developer, website
+        return "", ""
 
 
 async def scrape(url: str, keyword: str = None, industry: str = None, limit: int = 100, **kwargs) -> List[dict]:
@@ -114,38 +123,33 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 break
 
     try:
-        from playwright.async_api import async_playwright
-
-        results = []
-        seen_developers: set = set()
-
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-            )
-            ctx = await browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124",
-                viewport={"width": 1280, "height": 900},
-            )
-            list_page = await ctx.new_page()
-
-            # 取得 session
+        async with httpx.AsyncClient(
+            headers=_HEADERS,
+            follow_redirects=True,
+            timeout=15,
+        ) as client:
+            # 取得初始 cookie（無需瀏覽器）
             try:
-                await list_page.goto("https://newhouse.591.com.tw", timeout=40000, wait_until="domcontentloaded")
+                await client.get("https://newhouse.591.com.tw", timeout=15)
             except Exception:
-                await list_page.goto("https://newhouse.591.com.tw", timeout=40000, wait_until="commit")
-            await list_page.wait_for_timeout(1500)
+                pass
 
             # 第一層：翻頁取列表
             page_no = 1
-            raw_items = []
+            raw_items: list = []
 
             while len(raw_items) < lim:
-                resp = await list_page.request.get(
-                    "https://newhouse.591.com.tw/home/housing/search",
-                    params={"regionid": region_id, "page": str(page_no)},
-                )
-                data = await resp.json()
+                try:
+                    resp = await client.get(
+                        "https://newhouse.591.com.tw/home/housing/search",
+                        params={"regionid": region_id, "page": str(page_no)},
+                        timeout=10,
+                    )
+                    data = resp.json()
+                except Exception as e:
+                    logger.warning(f"591 list API error page={page_no}: {e}")
+                    break
+
                 d = data.get("data", {})
                 items = d.get("items", [])
                 total_pages = d.get("total_page", 1)
@@ -168,18 +172,25 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 if page_no >= total_pages:
                     break
                 page_no += 1
-                await asyncio.sleep(0.3)
+                await asyncio.sleep(0.2)
 
-            # 第二層：並發抓詳情（5 筆同時）
-            sem = asyncio.Semaphore(5)
+            if not raw_items:
+                logger.warning("591 list API returned no items, using fallback")
+                return FALLBACK_DATA[:lim]
+
+            # 第二層：並發抓詳情（10 筆同時）
+            sem = asyncio.Semaphore(10)
             detail_tasks = [
-                _fetch_one_detail(list_page, item["hid"], sem)
+                _fetch_detail(client, item["hid"], sem)
                 for item in raw_items if item.get("hid")
             ]
             detail_results = await asyncio.gather(*detail_tasks, return_exceptions=True)
 
             # 組合結果
+            results: list = []
+            seen: set = set()
             detail_idx = 0
+
             for item in raw_items:
                 if len(results) >= lim:
                     break
@@ -207,9 +218,9 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     continue
 
                 dedup_key = f"{company}|{region}"
-                if dedup_key in seen_developers:
+                if dedup_key in seen:
                     continue
-                seen_developers.add(dedup_key)
+                seen.add(dedup_key)
 
                 notes_parts = []
                 if build and build != developer:
@@ -232,8 +243,6 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                     "source_url":   f"https://newhouse.591.com.tw/{hid}" if hid else "https://newhouse.591.com.tw",
                     "notes":        "　".join(notes_parts) or None,
                 })
-
-            await browser.close()
 
         return results[:lim] if results else FALLBACK_DATA[:lim]
 
