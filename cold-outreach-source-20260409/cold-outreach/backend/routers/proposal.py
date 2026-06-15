@@ -310,7 +310,7 @@ async def get_chatgpt_prompt(
 - 重點：各管道設定明確 KPI（品牌曝光 vs 效果轉換），避免預算重疊浪費
 - 建議設立整合儀表板，跨管道歸因分析"""
 
-    prompt = f"""請幫我製作一份專業的數位行銷媒體提案 PowerPoint（使用 Code Interpreter 產生可下載的 .pptx 檔案）。
+    prompt = f"""請幫我製作一份專業的數位行銷媒體提案 PowerPoint（產生可下載的 .pptx 檔案，繁體中文）。
 
 【客戶資訊】
 客戶名稱：{lead.company_name}
@@ -321,19 +321,6 @@ async def get_chatgpt_prompt(
 {current_situation}
 
 {budget_guidance}
-
-【技術規格】
-- 簡報尺寸：13.33 英吋 × 7.5 英吋（16:9 寬螢幕）
-- python-pptx 1.0.x（所有 EMU 值需用 int() 轉換）
-- 語言：繁體中文
-
-【設計要求】
-- 頁數不限，依內容需求決定，不要強迫塞滿也不要省略重要內容
-- 每頁版面設計各不相同（嚴禁每頁都一樣）
-- 主色系：深藍 #1B3A6B + 橘色 #F57C00 + 白色
-- 善用色塊組合、對角線切版、左右分欄、卡片格狀等設計
-- 重要數據請用大字號突出顯示
-- 每頁都要有視覺層次感
 
 【簡報結構（頁碼固定，請嚴格遵守）】
 
