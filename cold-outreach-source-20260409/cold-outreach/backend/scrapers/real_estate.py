@@ -123,7 +123,8 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
                 hid       = item["hid"]
                 build     = item["build_name"]
-                phone_str = f"{item['phone']}轉{item['phone_ext']}" if item.get("phone") and item.get("phone_ext") else item.get("phone") or None
+                # 591 API 的 phone 是代理/轉接電話，非建設公司直線，存進 notes 供參考
+                proxy_phone = f"{item['phone']}轉{item['phone_ext']}" if item.get("phone") and item.get("phone_ext") else item.get("phone") or None
                 region    = item["region"].replace("縣", "").replace("市", "")[:3] or None
                 address   = item["address"] or None
                 developer = ""
@@ -146,7 +147,14 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
 
                 # 以「建商+城市」為去重 key（同一建商可能有多建案）
                 dedup_key = f"{company}|{region}"
-                notes = f"建案：{build}" if build and build != developer else (f"地址：{address}" if address else None)
+                notes_parts = []
+                if build and build != developer:
+                    notes_parts.append(f"建案：{build}")
+                elif address:
+                    notes_parts.append(f"地址：{address}")
+                if proxy_phone:
+                    notes_parts.append(f"591接洽電話：{proxy_phone}")
+                notes = "　".join(notes_parts) or None
 
                 if developer and dedup_key not in seen_developers:
                     seen_developers.add(dedup_key)
@@ -176,7 +184,7 @@ async def scrape(url: str, keyword: str = None, industry: str = None, limit: int
                 results.append({
                     "company_name": company,
                     "contact_name": None,
-                    "phone":        phone_str,
+                    "phone":        None,
                     "email":        None,
                     "website":      website,
                     "industry":     "房地產/建設",
