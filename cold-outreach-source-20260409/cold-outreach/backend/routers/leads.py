@@ -3,9 +3,9 @@ import io
 from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from database import get_db
-from fastapi.responses import JSONResponse
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog, PendingLeadApproval
 from schemas import LeadCreate, LeadUpdate, LeadStatusUpdate, LeadOut, ActivityOut
 from auth import get_current_user, get_visible_user_ids
@@ -250,6 +250,58 @@ def _recalc_one(lead: Lead, db: Session):
     lead.engagement_score = score
 
 
+@router.get("/template")
+def download_template(current_user: User = Depends(get_current_user)):
+    """下載 Excel 匯入範本（含中文欄位名稱與範例資料）"""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "名單範本"
+
+    headers = ["公司名稱", "部門", "聯絡人", "職稱", "email", "電話", "產業", "城市", "公司規模", "來源"]
+    header_fill = PatternFill(start_color="1E40AF", end_color="1E40AF", fill_type="solid")
+    header_font = Font(color="FFFFFF", bold=True)
+
+    for col, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=h)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = Alignment(horizontal="center")
+
+    # 標記必填欄位 (公司名稱)
+    ws.cell(row=2, column=1, value="範例公司股份有限公司")
+    ws.cell(row=2, column=2, value="行銷部")
+    ws.cell(row=2, column=3, value="王小明")
+    ws.cell(row=2, column=4, value="行銷總監")
+    ws.cell(row=2, column=5, value="example@company.com")
+    ws.cell(row=2, column=6, value="02-1234-5678")
+    ws.cell(row=2, column=7, value="數位行銷")
+    ws.cell(row=2, column=8, value="台北")
+    ws.cell(row=2, column=9, value="50-100人")
+    ws.cell(row=2, column=10, value="csv_import")
+
+    # 欄位寬度
+    col_widths = [25, 12, 12, 14, 28, 16, 14, 10, 12, 14]
+    for col, width in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col)].width = width
+
+    # 備註行
+    note_cell = ws.cell(row=3, column=1, value="※ 公司名稱為必填，其餘欄位選填")
+    note_cell.font = Font(color="DC2626", italic=True)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="lead_template.xlsx"'},
+    )
+
+
 @router.post("/import")
 async def import_csv(
     file: UploadFile = File(...),
@@ -270,6 +322,7 @@ async def import_csv(
                 continue
             lead = Lead(
                 company_name=company.strip(),
+                department=(row.get("department") or row.get("部門") or "").strip() or None,
                 contact_name=(row.get("contact_name") or row.get("聯絡人") or "").strip() or None,
                 title=(row.get("title") or row.get("職稱") or "").strip() or None,
                 email=(row.get("email") or row.get("Email") or "").strip() or None,
@@ -277,7 +330,7 @@ async def import_csv(
                 industry=(row.get("industry") or row.get("產業") or "").strip() or None,
                 city=(row.get("city") or row.get("城市") or "").strip() or None,
                 company_size=(row.get("company_size") or row.get("公司規模") or "").strip() or None,
-                source=(row.get("source") or "csv_import").strip(),
+                source=(row.get("source") or row.get("來源") or "csv_import").strip(),
                 assigned_to=current_user.id if current_user.role == UserRole.sales else None,
                 status=LeadStatus.new,
             )

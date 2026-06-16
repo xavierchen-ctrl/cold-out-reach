@@ -61,6 +61,9 @@ export const importCSV = (file: File) => {
   return api.post('/leads/import', form)
 }
 
+export const downloadLeadTemplate = () =>
+  api.get('/leads/template', { responseType: 'blob' })
+
 // ── Activities ────────────────────────────────────────────────────────────────
 export const getActivities = (leadId: string) =>
   api.get(`/leads/${leadId}/activities`)

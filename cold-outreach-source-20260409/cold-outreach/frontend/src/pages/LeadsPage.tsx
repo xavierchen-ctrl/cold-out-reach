@@ -2,7 +2,7 @@
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   getLeads, createLead, updateLead, deleteLead, updateLeadStatus,
-  importCSV, getActivities, createActivity, getGmailAuthUrl, sendEmail, generateDraft,
+  importCSV, downloadLeadTemplate, getActivities, createActivity, getGmailAuthUrl, sendEmail, generateDraft,
   runScraper, getScraperJobs, previewScraperJob, importScraperJob,
   scoreLead, scoreBatch, bulkStatus, bulkDelete, getSequences, enrollSequence, enrichLushaPhone, enrichLushaStatus,
   exportCsv, getUsers, getTags, addLeadTags, getICPs, batchAnalyzeSignals,
@@ -523,6 +523,7 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
   const [file, setFile] = useState<File | null>(null)
   const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null)
   const [loading, setLoading] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleImport = async () => {
@@ -539,22 +540,56 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
     }
   }
 
+  const handleDownloadTemplate = async () => {
+    setDownloading(true)
+    try {
+      const res = await downloadLeadTemplate()
+      const url = URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'lead_template.xlsx'
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      alert('下載範本失敗')
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div className="max-w-lg">
-      <p className="text-sm text-muted-foreground mb-4">
-        支援欄位：company_name（必填）、contact_name、title、email、phone、industry、city、company_size、source
-      </p>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <p className="text-sm text-muted-foreground">
+            支援欄位：
+            <span className="text-foreground font-medium">公司名稱（必填）</span>、
+            部門、聯絡人、職稱、email、電話、產業、城市、公司規模、來源
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-4 shrink-0"
+          onClick={handleDownloadTemplate}
+          disabled={downloading}
+        >
+          {downloading ? '下載中...' : '下載 Excel 範本'}
+        </Button>
+      </div>
       <div
         className="border-2 border-dashed border-input rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors"
         onClick={() => inputRef.current?.click()}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); setFile(e.dataTransfer.files?.[0] || null) }}
       >
         <Upload className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-        <p className="text-sm font-medium">{file ? file.name : '點擊選擇 CSV 檔案'}</p>
+        <p className="text-sm font-medium">{file ? file.name : '點擊選擇 CSV / Excel 檔案'}</p>
         <p className="text-xs text-muted-foreground mt-1">或拖曳至此</p>
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.xlsx,.xls"
           className="hidden"
           onChange={e => setFile(e.target.files?.[0] || null)}
         />
