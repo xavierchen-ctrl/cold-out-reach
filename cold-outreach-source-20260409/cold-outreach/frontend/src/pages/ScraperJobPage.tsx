@@ -31,6 +31,8 @@ export default function ScraperJobPage() {
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [findingWebsite, setFindingWebsite] = useState<Set<number>>(new Set())
   const [findingPhone, setFindingPhone] = useState<Set<number>>(new Set())
+  const [bulkFinding, setBulkFinding] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 })
 
   useEffect(() => {
     if (!id) return
@@ -105,6 +107,27 @@ export default function ScraperJobPage() {
     }
   }
 
+  const handleBulkFindPhone = async () => {
+    const pending = companies.map((c, i) => ({ c, i })).filter(({ c }) => !c.phone)
+    if (pending.length === 0) return
+    setBulkFinding(true)
+    setBulkProgress({ done: 0, total: pending.length })
+    for (const { c, i } of pending) {
+      setFindingPhone(prev => new Set(prev).add(i))
+      try {
+        const res = await findCompanyPhone(c.company_name, c.website, c.city)
+        const phone: string | null = res.data.phone
+        if (phone) {
+          setCompanies(prev => prev.map((x, xi) => xi === i ? { ...x, phone } : x))
+          if (id) await updateScraperJobField(id, i, 'phone', phone)
+        }
+      } catch { /* 單筆失敗繼續下一筆 */ }
+      setFindingPhone(prev => { const s = new Set(prev); s.delete(i); return s })
+      setBulkProgress(p => ({ ...p, done: p.done + 1 }))
+    }
+    setBulkFinding(false)
+  }
+
   const handleImport = async () => {
     if (!id) return
     setImporting(true)
@@ -144,7 +167,20 @@ export default function ScraperJobPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          {!isPostsMode && (
+            <Button
+              variant="outline"
+              onClick={handleBulkFindPhone}
+              disabled={bulkFinding || companies.filter(c => !c.phone).length === 0}
+              className="shadow-sm"
+            >
+              {bulkFinding
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />查找中 {bulkProgress.done}/{bulkProgress.total}</>
+                : <><Search className="w-4 h-4 mr-2" />批量查找電話 ({companies.filter(c => !c.phone).length})</>
+              }
+            </Button>
+          )}
           <Button onClick={handleImport} disabled={importing} className="shadow-sm">
             <Download className="w-4 h-4 mr-2" />
             {importing ? '匯入中...' : `匯入名單 (${importCount})`}
