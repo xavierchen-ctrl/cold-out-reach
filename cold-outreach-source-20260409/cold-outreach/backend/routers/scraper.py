@@ -315,6 +315,7 @@ async def _guess_domain(client, company_name: str) -> _Opt[str]:
 @router.get("/find-website")
 async def find_website_for_company(
     q: str,
+    city: _Opt[str] = None,
     current_user: User = Depends(get_current_user),
 ):
     """根據公司名稱搜尋官方網站（DuckDuckGo → Bing → Google → 域名猜測）"""
@@ -327,14 +328,16 @@ async def find_website_for_company(
         '', q, flags=_re.IGNORECASE,
     ).strip(' ,.')
 
+    city_suffix = f" {city}" if city else ""
+
     if is_english:
         candidates = [
-            f"{clean_q} official website",
+            f"{clean_q}{city_suffix} official website",
             f"{clean_q} taiwan",
             f"{q} official website",
         ]
     else:
-        candidates = [f"{q} 官方網站", f"{q} 官網", q]
+        candidates = [f"{q}{city_suffix} 官方網站", f"{q}{city_suffix} 官網", f"{q} 官網"]
 
     found = None
     try:
@@ -375,6 +378,7 @@ async def find_website_for_company(
 async def find_phone_for_company(
     q: str,
     website: _Opt[str] = None,
+    city: _Opt[str] = None,
     current_user: User = Depends(get_current_user),
 ):
     """搜尋公司電話：先爬官網，再用 Gemini，再用 DuckDuckGo/Bing"""
@@ -537,9 +541,10 @@ async def find_phone_for_company(
         return None
 
     found = None
+    city_suffix = f" {city}" if city else ""
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True) as client:
-            found = await _search_for_phone(client, f"{q} 電話")
+            found = await _search_for_phone(client, f"{q}{city_suffix} 電話")
             if not found:
                 found = await _search_for_phone(client, f"{q} 聯絡電話 台灣")
     except Exception as e:
