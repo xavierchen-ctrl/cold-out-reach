@@ -173,7 +173,7 @@ export default function AnalyticsPage() {
       {/* Keyword Trackers Section */}
       <section>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">🔍 競品關鍵字追蹤</h2>
+          <h2 className="text-lg font-semibold">競品關鍵字追蹤</h2>
           <Button size="sm" onClick={() => setShowCreateTracker(true)}>
             <Plus className="w-4 h-4 mr-1" /> 新增監測
           </Button>
