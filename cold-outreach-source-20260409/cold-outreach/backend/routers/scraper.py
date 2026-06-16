@@ -641,10 +641,13 @@ def update_job_field(
 @router.get("/check-env")
 def check_env():
     """診斷：確認各爬蟲 API key 是否已設定（只顯示 true/false，不顯示值）"""
+    import openai as _openai_pkg
     return {
         "APOLLO_API_KEY":    bool(_os.getenv("APOLLO_API_KEY")),
         "GEMINI_API_KEY":    bool(_os.getenv("GEMINI_API_KEY")),
+        "OPENAI_API_KEY":    bool(_os.getenv("OPENAI_API_KEY")),
         "DATABASE_URL":      bool(_os.getenv("DATABASE_URL")),
+        "openai_version":    getattr(_openai_pkg, "__version__", "unknown"),
     }
 
 
