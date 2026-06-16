@@ -438,36 +438,48 @@ async def find_phone_for_company(
         return None
 
     city_suffix = f" {city}" if city else ""
-    queries = [
-        f"{q}{city_suffix} 電話",
-        f"{q} 聯絡電話",
-    ]
+    city_hint = f"（{city}）" if city else ""
 
-    # 1. Google（Knowledge Panel 電話最準確）
+    # 1. Gemini + Google Search Grounding（直接呼叫 Google API，不受 IP 封鎖影響）
+    gemini_key = _os2.getenv("GEMINI_API_KEY", "")
+    if gemini_key:
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=gemini_key)
+            prompt = (
+                f"使用 Google 搜尋台灣建案或公司「{q}」{city_hint}的接待中心或公司電話號碼。"
+                f"只回傳電話號碼本身（格式如 06-585-2588 或 037-691-177），不要任何說明文字。"
+                f"如果找不到請回傳 null。"
+            )
+            try:
+                tool = genai.protos.Tool(
+                    google_search_retrieval=genai.protos.GoogleSearchRetrieval()
+                )
+                model = genai.GenerativeModel("gemini-2.0-flash", tools=[tool])
+            except Exception:
+                model = genai.GenerativeModel("gemini-2.0-flash")
+            resp = model.generate_content(prompt)
+            raw = resp.text.strip()
+            logger.info(f"find-phone gemini raw for {q!r}: {raw!r}")
+            if raw and raw.lower() != "null":
+                m = _TW_PHONE.search(raw)
+                if m:
+                    digits = _re.sub(r'\D', '', m.group(1))
+                    if _is_valid_phone(digits):
+                        return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                digits_only = _re.sub(r'\D', '', raw)
+                if 8 <= len(digits_only) <= 10 and digits_only.startswith('0') and _is_valid_phone(digits_only):
+                    return {"phone": _fmt_phone_digits(digits_only)}
+        except Exception as e:
+            logger.warning(f"find-phone gemini error for {q!r}: {e}")
+
+    # 2. Bing（比 Google SERP 較不封鎖伺服器 IP）
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
-            for query in queries:
+            for query in [f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
                 try:
                     resp = await client.get(
-                        f"https://www.google.com/search?q={_urlparse.quote(query)}&hl=zh-TW&gl=tw&num=5",
-                        timeout=12,
-                    )
-                    result = _extract_phone_from_html(resp.text)
-                    if result:
-                        logger.info(f"find-phone google hit for {q!r}: {result}")
-                        return {"phone": result}
-                except Exception:
-                    pass
-    except Exception as e:
-        logger.warning(f"find-phone google error for {q!r}: {e}")
-
-    # 2. Bing
-    try:
-        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
-            for query in queries:
-                try:
-                    resp = await client.get(
-                        f"https://www.bing.com/search?q={_urlparse.quote(query)}&setlang=zh-TW",
+                        f"https://www.bing.com/search?q={_urlparse.quote(query)}&setlang=zh-TW&cc=TW",
                         timeout=12,
                     )
                     result = _extract_phone_from_html(resp.text)
@@ -481,7 +493,7 @@ async def find_phone_for_company(
     # 3. DuckDuckGo
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
-            for query in queries:
+            for query in [f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
                 try:
                     resp = await client.get(
                         f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
@@ -503,9 +515,10 @@ async def find_phone_for_company(
                 timeout=10,
             )
             text = _re.sub(r'<[^>]+>', ' ', resp.text)
-            m = _TW_PHONE.search(text)
-            if m:
-                return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+            for m in _TW_PHONE.finditer(text):
+                digits = _re.sub(r'\D', '', m.group(1))
+                if _is_valid_phone(digits):
+                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
     except Exception as e:
         logger.warning(f"find-phone yellow.com.tw error for {q!r}: {e}")
 
@@ -523,48 +536,17 @@ async def find_phone_for_company(
                             digits = _re.sub(r'\D', '', tel.lstrip('+'))
                             if digits.startswith('886'):
                                 digits = '0' + digits[3:]
-                            if 8 <= len(digits) <= 10 and digits.startswith('0'):
+                            if 8 <= len(digits) <= 10 and digits.startswith('0') and _is_valid_phone(digits):
                                 return {"phone": _fmt_phone_digits(digits)}
                         text = _re.sub(r'<[^>]+>', ' ', resp.text)
-                        m = _TW_PHONE.search(text)
-                        if m:
-                            return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                        for m in _TW_PHONE.finditer(text):
+                            digits = _re.sub(r'\D', '', m.group(1))
+                            if _is_valid_phone(digits):
+                                return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
                     except Exception:
                         continue
         except Exception as e:
             logger.warning(f"find-phone website scrape error for {website!r}: {e}")
-
-    # 6. Gemini + Google Search Grounding
-    gemini_key = _os2.getenv("GEMINI_API_KEY", "")
-    if gemini_key:
-        try:
-            import google.generativeai as genai
-            genai.configure(api_key=gemini_key)
-            city_hint = f"（{city}）" if city else ""
-            prompt = (
-                f"Search Google for the phone number of Taiwan company「{q}」{city_hint}. "
-                f"Reply with ONLY the phone number digits and hyphens (e.g. 037-691-177 or 0912-345-678). "
-                f"No explanation, no other text. If not found reply null."
-            )
-            try:
-                tool = genai.protos.Tool(
-                    google_search_retrieval=genai.protos.GoogleSearchRetrieval()
-                )
-                model = genai.GenerativeModel("gemini-2.0-flash", tools=[tool])
-            except Exception:
-                model = genai.GenerativeModel("gemini-2.0-flash")
-            resp = model.generate_content(prompt)
-            raw = resp.text.strip()
-            logger.info(f"find-phone gemini raw for {q!r}: {raw!r}")
-            if raw and raw.lower() != "null":
-                m = _TW_PHONE.search(raw)
-                if m:
-                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
-                digits_only = _re.sub(r'\D', '', raw)
-                if 8 <= len(digits_only) <= 10 and digits_only.startswith('0'):
-                    return {"phone": _fmt_phone_digits(digits_only)}
-        except Exception as e:
-            logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
     return {"phone": None}
 
