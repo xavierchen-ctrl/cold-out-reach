@@ -268,8 +268,16 @@ export default function ScraperJobPage() {
 
                         <td className="py-2 px-4 hidden lg:table-cell" onClick={e => e.stopPropagation()}>
                           {c.phone ? (
-                            <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit">
+                            <div className="flex items-center gap-1 text-xs text-emerald-700 bg-emerald-50 px-2 py-1 rounded w-fit group">
                               <Phone className="w-3.5 h-3.5 shrink-0" /> {c.phone}
+                              <button
+                                onClick={async () => {
+                                  setCompanies(prev => prev.map((x, i) => i === idx ? { ...x, phone: undefined } : x))
+                                  if (id) await updateScraperJobField(id, idx, 'phone', null)
+                                }}
+                                className="ml-1 opacity-0 group-hover:opacity-100 text-emerald-400 hover:text-red-500 transition-opacity"
+                                title="清除電話"
+                              >×</button>
                             </div>
                           ) : findingPhone.has(idx) ? (
                             <span className="flex items-center gap-1 text-xs text-gray-400">
