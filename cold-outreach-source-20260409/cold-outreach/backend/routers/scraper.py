@@ -206,7 +206,7 @@ def _is_good_url(url: str) -> bool:
 
 
 _TW_AREA3_SET = {'037', '038', '039', '049', '055', '056', '082', '083', '089'}
-_TW_AREA2_7DIGIT = {'05', '06', '07', '08'}  # 2-digit area codes with 7-digit locals
+_TW_AREA2_7DIGIT = {'03', '04', '05', '06', '07', '08'}  # 2-digit area codes with 7-digit locals
 
 
 def _fmt_phone_digits(digits: str) -> str:
@@ -409,8 +409,9 @@ async def find_phone_for_company(
         return digits not in _BAD_DIGITS
 
     def _extract_phone_from_html(html: str) -> _Opt[str]:
-        # 移除 104/1111/求職網站相關 HTML 區塊，避免抓到 HR 電話
-        for bad_domain in ('104.com.tw', '1111.com.tw', '518.com.tw', 'yes123.com.tw', '591.com'):
+        # 移除求職/房仲平台相關 HTML 區塊，避免抓到 HR 電話或仲介電話
+        for bad_domain in ('104.com.tw', '1111.com.tw', '518.com.tw', 'yes123.com.tw', '591.com',
+                           'rakuya.com.tw', 'sinyi.com.tw', 'house.com.tw', 'yungching.com.tw'):
             html = _re.sub(
                 rf'<[^>]*href=["\'][^"\']*{_re.escape(bad_domain)}[^"\']*["\'][^>]*>.*?(?=<(?:div|li|tr|article))',
                 '', html, flags=_re.S | _re.I,
@@ -444,9 +445,10 @@ async def find_phone_for_company(
     # 1. OpenAI 網路搜尋（OPENAI_API_KEY 確定有設）
     openai_key = _os2.getenv("OPENAI_API_KEY", "")
     _phone_prompt = (
-        f"請搜尋台灣建案或公司「{q}」{city_hint}的接待中心或辦公室電話號碼。"
-        f"只回傳電話號碼本身（格式如 02-2912-1888 或 06-585-2588），不要任何說明文字。"
-        f"如果找不到請回傳 null。"
+        f"請搜尋台灣建案或建商「{q}」{city_hint}的接待中心電話或公司電話號碼。"
+        f"這是台灣的房地產建案，請直接從Google搜尋結果或知識面板中找到電話。"
+        f"電話格式可能是 02-XXXX-XXXX、04-XXX-XXXX、06-XXX-XXXX、07-XXX-XXXX 或 09XX-XXX-XXX。"
+        f"只回傳電話號碼本身，不要任何說明文字。如果找不到請回傳 null。"
     )
     if openai_key:
         # 1a. Responses API with web_search_preview tool（最新 OpenAI 網路搜尋）
