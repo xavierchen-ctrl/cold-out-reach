@@ -9,7 +9,7 @@ import {
   getLeadTags, getTags, addLeadTags, removeLeadTag,
   getAttachments, uploadAttachment, downloadAttachment, deleteAttachment,
   getLeadCadences, getCalls, createCall, recalcEngagement,
-  analyzeSignals, generateEmail, generateProposalEmail,
+  analyzeSignals, generateEmail, generateChatGptPrompt,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, EmailTemplate, Contact, Tag, Attachment, CadenceEnrollment, CallLog, CallOutcome, CALL_OUTCOME_LABELS, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, ACTIVITY_LABELS } from '@/types'
@@ -20,7 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame, Paperclip, X } from 'lucide-react'
+import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame, Paperclip, X, Copy, CheckCheck, Loader2, FileText as FileTextIcon } from 'lucide-react'
 import { format } from 'date-fns'
 
 const CADENCE_STEP_ICONS: Record<string, string> = {
@@ -71,12 +71,14 @@ export default function LeadDetailPage() {
   const [capitalInput, setCapitalInput] = useState('')
   const [savingCapital, setSavingCapital] = useState(false)
 
-  // Proposal
+  // PPTX 提案簡報
   const [showProposalModal, setShowProposalModal] = useState(false)
-  const [proposalProduct, setProposalProduct] = useState('廣告投放')
-  const [proposalTone, setProposalTone] = useState('professional')
-  const [proposalResult, setProposalResult] = useState<{ subject: string; body: string; key_points: string[] } | null>(null)
-  const [generatingProposal, setGeneratingProposal] = useState(false)
+  const [pptxServices, setPptxServices] = useState<string[]>(['廣告投放', 'SEO優化'])
+  const [pptxBudget, setPptxBudget] = useState('50-100萬/月')
+  const [pptxContext, setPptxContext] = useState('')
+  const [pptxContextFiles, setPptxContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
+  const [pptxPromptLoading, setPptxPromptLoading] = useState(false)
+  const [pptxPromptCopied, setPptxPromptCopied] = useState(false)
 
   // Cadence enrollments
   const [cadenceEnrollments, setCadenceEnrollments] = useState<CadenceEnrollment[]>([])
@@ -433,17 +435,41 @@ export default function LeadDetailPage() {
     }
   }
 
-  const handleGenerateProposal = async () => {
+  const handlePptxContextFileAdd = (e: React.ChangeEvent<HTMLInputElement>) => {
+    Array.from(e.target.files || []).forEach(file => {
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = ev => setPptxContextFiles(prev => [...prev, { file, preview: ev.target?.result as string }])
+        reader.readAsDataURL(file)
+      } else {
+        setPptxContextFiles(prev => [...prev, { file }])
+      }
+    })
+    e.target.value = ''
+  }
+
+  const handleCopyPptxPrompt = async () => {
     if (!id) return
-    setGeneratingProposal(true)
-    setProposalResult(null)
+    let extraContext = pptxContext
+    for (const cf of pptxContextFiles.filter(cf => !cf.preview)) {
+      const text = await cf.file.text()
+      extraContext += `\n\n【參考文件：${cf.file.name}】\n${text}`
+    }
+    setPptxPromptLoading(true)
     try {
-      const res = await generateProposalEmail({ lead_id: id, product: proposalProduct, tone: proposalTone })
-      setProposalResult(res.data)
-    } catch (e: unknown) {
-      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '提案信生成失敗')
+      const res = await generateChatGptPrompt({
+        lead_id: id,
+        services: pptxServices,
+        budget_range: pptxBudget,
+        extra_context: extraContext,
+      })
+      await navigator.clipboard.writeText(res.data.prompt)
+      setPptxPromptCopied(true)
+      setTimeout(() => setPptxPromptCopied(false), 8000)
+    } catch {
+      alert('無法取得提示詞，請稍後再試')
     } finally {
-      setGeneratingProposal(false)
+      setPptxPromptLoading(false)
     }
   }
 
@@ -480,9 +506,9 @@ export default function LeadDetailPage() {
               <Sparkles className="w-3.5 h-3.5 md:mr-1.5" />
               <span className="hidden md:inline">✨ AI 生成 Email</span>
             </Button>
-            <Button size="sm" variant="outline" onClick={() => { setShowProposalModal(true); setProposalResult(null) }}>
-              <span className="md:mr-1.5">📋</span>
-              <span className="hidden md:inline">生成提案信</span>
+            <Button size="sm" variant="outline" onClick={() => setShowProposalModal(true)}>
+              <span className="md:mr-1.5">📊</span>
+              <span className="hidden md:inline">生成提案簡報</span>
             </Button>
             <Button size="sm" onClick={() => setShowEmail(true)}>
               <Mail className="w-3.5 h-3.5 md:mr-1.5" />
@@ -1622,85 +1648,136 @@ export default function LeadDetailPage() {
         />
       )}
 
-      {/* Proposal Modal */}
-      <Dialog open={showProposalModal} onOpenChange={v => { setShowProposalModal(v); if (!v) setProposalResult(null) }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader><DialogTitle>📋 生成提案信</DialogTitle></DialogHeader>
+      {/* 提案簡報 Modal */}
+      <Dialog open={showProposalModal} onOpenChange={setShowProposalModal}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader><DialogTitle>📊 生成提案簡報</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label>主推產品</Label>
-                <Select value={proposalProduct} onValueChange={setProposalProduct}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {['廣告投放', 'SEO優化', '社群代操', '整合行銷', 'KOL行銷', '程序化廣告'].map(p => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label>語氣</Label>
-                <Select value={proposalTone} onValueChange={setProposalTone}>
-                  <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="professional">專業正式</SelectItem>
-                    <SelectItem value="friendly">親切友善</SelectItem>
-                    <SelectItem value="urgent">急迫有力</SelectItem>
-                  </SelectContent>
-                </Select>
+            {/* 客戶（唯讀） */}
+            <div className="rounded-lg bg-muted px-3 py-2 text-sm">
+              <span className="text-muted-foreground">客戶：</span>
+              <span className="font-medium">{lead.company_name}</span>
+              {lead.industry && <span className="text-muted-foreground ml-2">· {lead.industry}</span>}
+            </div>
+
+            {/* 主推服務 */}
+            <div>
+              <Label>主推服務（可多選）</Label>
+              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                {['廣告投放', 'SEO優化', '社群代操', '整合行銷', 'KOL行銷', '程序化廣告'].map(o => (
+                  <button
+                    key={o}
+                    type="button"
+                    onClick={() => setPptxServices(prev =>
+                      prev.includes(o) ? prev.filter(s => s !== o) : [...prev, o]
+                    )}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      pptxServices.includes(o)
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                    }`}
+                  >
+                    {o}
+                  </button>
+                ))}
               </div>
             </div>
-            <Button onClick={handleGenerateProposal} disabled={generatingProposal} className="w-full">
-              <Sparkles className="w-4 h-4 mr-2" />
-              {generatingProposal ? '生成中...' : '生成提案信'}
-            </Button>
 
-            {proposalResult && (
-              <div className="space-y-3">
-                <div className="p-3 bg-muted rounded-lg">
-                  <p className="text-xs font-medium text-muted-foreground mb-1">信件主旨</p>
-                  <p className="text-sm font-medium">{proposalResult.subject}</p>
+            {/* 預算規模 */}
+            <div>
+              <Label>預算規模</Label>
+              <Select value={pptxBudget} onValueChange={setPptxBudget}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {['10-30萬/月', '30-50萬/月', '50-100萬/月', '100萬以上/月'].map(o => (
+                    <SelectItem key={o} value={o}>{o}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* 補充背景 */}
+            <div>
+              <Label>補充背景（選填）</Label>
+              <Textarea
+                className="mt-1 text-sm"
+                rows={2}
+                placeholder="例：主力商品為保健食品，目前主要靠口碑，想開始投放廣告..."
+                value={pptxContext}
+                onChange={e => setPptxContext(e.target.value)}
+              />
+              <div className="mt-2 flex items-center gap-2">
+                <Button
+                  variant="outline" size="sm"
+                  className="text-xs h-7 px-2" type="button"
+                  onClick={() => document.getElementById('pptx-ctx-file')?.click()}
+                >
+                  <Paperclip className="w-3 h-3 mr-1" />附加檔案
+                </Button>
+                <span className="text-xs text-muted-foreground">PNG、JPG、TXT</span>
+              </div>
+              <input
+                id="pptx-ctx-file" type="file"
+                accept="image/png,image/jpeg,image/webp,.txt"
+                multiple className="hidden"
+                onChange={handlePptxContextFileAdd}
+              />
+              {pptxContextFiles.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {pptxContextFiles.map((cf, i) => (
+                    <div key={i} className="relative group">
+                      {cf.preview
+                        ? <img src={cf.preview} alt={cf.file.name} className="w-14 h-14 object-cover rounded border" />
+                        : (
+                          <div className="w-14 h-14 flex flex-col items-center justify-center border rounded bg-slate-50 gap-1 p-1">
+                            <FileTextIcon className="w-4 h-4 text-muted-foreground" />
+                            <span className="text-[9px] text-muted-foreground text-center break-all line-clamp-2">{cf.file.name}</span>
+                          </div>
+                        )}
+                      <button
+                        type="button"
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-destructive text-white rounded-full items-center justify-center hidden group-hover:flex"
+                        onClick={() => setPptxContextFiles(prev => prev.filter((_, j) => j !== i))}
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-                {proposalResult.key_points.length > 0 && (
-                  <div className="p-3 bg-blue-50 rounded-lg">
-                    <p className="text-xs font-medium text-blue-600 mb-1">重點摘要</p>
-                    <ul className="space-y-1">
-                      {proposalResult.key_points.map((pt, i) => (
-                        <li key={i} className="text-xs text-blue-700">• {pt}</li>
-                      ))}
-                    </ul>
+              )}
+            </div>
+
+            {/* 複製成功提示 */}
+            {pptxPromptCopied && (
+              <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <CheckCheck className="w-4 h-4 text-green-600 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-green-800">提示詞已複製！</p>
+                    <p className="text-xs text-green-600 mt-0.5">開啟 ChatGPT → 貼上 → 送出，即可產生 PPTX</p>
                   </div>
-                )}
-                <div>
-                  <p className="text-xs font-medium text-muted-foreground mb-1">信件正文</p>
-                  <Textarea
-                    value={proposalResult.body}
-                    onChange={e => setProposalResult(r => r ? { ...r, body: e.target.value } : r)}
-                    rows={12}
-                    className="text-sm"
-                  />
                 </div>
-                <div className="flex gap-2 justify-end">
-                  <Button variant="outline" size="sm" onClick={() => {
-                    if (!proposalResult) return
-                    navigator.clipboard.writeText(`主旨：${proposalResult.subject}\n\n${proposalResult.body}`)
-                    alert('✅ 已複製到剪貼簿')
-                  }}>
-                    複製
-                  </Button>
-                  <Button size="sm" onClick={() => {
-                    if (!proposalResult) return
-                    setEmailSubject(proposalResult.subject)
-                    setEmailBody(proposalResult.body)
-                    setShowProposalModal(false)
-                    setShowEmail(true)
-                  }}>
-                    套用到發信
-                  </Button>
-                </div>
+                <a href="https://chatgpt.com" target="_blank" rel="noreferrer"
+                  className="ml-3 shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors">
+                  開啟 ChatGPT →
+                </a>
               </div>
             )}
+
+            {/* 操作按鈕 */}
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button variant="outline" onClick={() => setShowProposalModal(false)} disabled={pptxPromptLoading}>取消</Button>
+              <Button
+                onClick={handleCopyPptxPrompt}
+                disabled={pptxServices.length === 0 || pptxPromptLoading}
+              >
+                {pptxPromptLoading
+                  ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />整理資料中...</>
+                  : pptxPromptCopied
+                  ? <><CheckCheck className="w-4 h-4 mr-1.5" />已複製！再次複製</>
+                  : <><Copy className="w-4 h-4 mr-1.5" />複製 ChatGPT 提示詞</>}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
