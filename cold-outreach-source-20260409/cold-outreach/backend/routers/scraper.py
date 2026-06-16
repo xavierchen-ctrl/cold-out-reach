@@ -445,10 +445,12 @@ async def find_phone_for_company(
     # 1. OpenAI 網路搜尋（OPENAI_API_KEY 確定有設）
     openai_key = _os2.getenv("OPENAI_API_KEY", "")
     _phone_prompt = (
-        f"請搜尋台灣建案或建商「{q}」{city_hint}的接待中心電話或公司電話號碼。"
-        f"這是台灣的房地產建案，請直接從Google搜尋結果或知識面板中找到電話。"
-        f"電話格式可能是 02-XXXX-XXXX、04-XXX-XXXX、06-XXX-XXXX、07-XXX-XXXX 或 09XX-XXX-XXX。"
-        f"只回傳電話號碼本身，不要任何說明文字。如果找不到請回傳 null。"
+        f"請搜尋台灣房地產建案或建商「{q}」{city_hint}的接待中心電話或公司辦公室電話。"
+        f"重要：這必須是房地產/建設公司的電話。"
+        f"如果搜尋結果中的電話屬於超市、餐廳、旅遊、零售、醫療等非房地產行業，請回傳 null。"
+        f"如果無法確認電話確實屬於這個建案或建商本身，請回傳 null。"
+        f"電話格式：02-XXXX-XXXX、04-XXX-XXXX、06-XXX-XXXX、07-XXX-XXXX 或 09XX-XXX-XXX。"
+        f"只回傳電話號碼本身，不要任何說明文字。找不到請回傳 null。"
     )
     if openai_key:
         # 1a. Responses API with web_search_preview tool（最新 OpenAI 網路搜尋）
