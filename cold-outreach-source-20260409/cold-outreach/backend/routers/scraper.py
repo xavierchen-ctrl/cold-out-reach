@@ -441,25 +441,25 @@ async def find_phone_for_company(
     city_suffix = f" {city}" if city else ""
     city_hint = f"（{city}）" if city else ""
 
-    # 1. OpenAI gpt-4o-search-preview（內建網路搜尋，OPENAI_API_KEY 確定有設）
+    # 1. OpenAI 網路搜尋（OPENAI_API_KEY 確定有設）
     openai_key = _os2.getenv("OPENAI_API_KEY", "")
+    _phone_prompt = (
+        f"請搜尋台灣建案或公司「{q}」{city_hint}的接待中心或辦公室電話號碼。"
+        f"只回傳電話號碼本身（格式如 02-2912-1888 或 06-585-2588），不要任何說明文字。"
+        f"如果找不到請回傳 null。"
+    )
     if openai_key:
+        # 1a. Responses API with web_search_preview tool（最新 OpenAI 網路搜尋）
         try:
             from openai import AsyncOpenAI as _OAI
             _oai = _OAI(api_key=openai_key)
-            _resp = await _oai.chat.completions.create(
-                model="gpt-4o-search-preview",
-                messages=[{
-                    "role": "user",
-                    "content": (
-                        f"請搜尋台灣建案或公司「{q}」{city_hint}的接待中心或辦公室電話號碼。"
-                        f"只回傳電話號碼本身（格式如 02-2912-1888 或 06-585-2588），不要任何說明文字。"
-                        f"如果找不到請回傳 null。"
-                    ),
-                }],
+            _resp = await _oai.responses.create(
+                model="gpt-4o",
+                tools=[{"type": "web_search_preview"}],
+                input=_phone_prompt,
             )
-            raw = (_resp.choices[0].message.content or "").strip()
-            logger.info(f"find-phone openai raw for {q!r}: {raw!r}")
+            raw = (getattr(_resp, 'output_text', None) or "").strip()
+            logger.info(f"find-phone openai-responses raw for {q!r}: {raw!r}")
             if raw and raw.lower() != "null":
                 m = _TW_PHONE.search(raw)
                 if m:
@@ -470,7 +470,30 @@ async def find_phone_for_company(
                 if 8 <= len(digits_only) <= 10 and digits_only.startswith('0') and _is_valid_phone(digits_only):
                     return {"phone": _fmt_phone_digits(digits_only)}
         except Exception as e:
-            logger.warning(f"find-phone openai error for {q!r}: {e}")
+            logger.warning(f"find-phone openai-responses error for {q!r}: {e}")
+
+        # 1b. chat.completions search-preview 備援
+        try:
+            from openai import AsyncOpenAI as _OAI
+            _oai = _OAI(api_key=openai_key)
+            _resp = await _oai.chat.completions.create(
+                model="gpt-4o-search-preview",
+                web_search_options={},
+                messages=[{"role": "user", "content": _phone_prompt}],
+            )
+            raw = (_resp.choices[0].message.content or "").strip()
+            logger.info(f"find-phone openai-chat raw for {q!r}: {raw!r}")
+            if raw and raw.lower() != "null":
+                m = _TW_PHONE.search(raw)
+                if m:
+                    digits = _re.sub(r'\D', '', m.group(1))
+                    if _is_valid_phone(digits):
+                        return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+                digits_only = _re.sub(r'\D', '', raw)
+                if 8 <= len(digits_only) <= 10 and digits_only.startswith('0') and _is_valid_phone(digits_only):
+                    return {"phone": _fmt_phone_digits(digits_only)}
+        except Exception as e:
+            logger.warning(f"find-phone openai-chat error for {q!r}: {e}")
 
     # 2. Gemini + Google Search Grounding（直接呼叫 Google API，不受 IP 封鎖影響）
     gemini_key = _os2.getenv("GEMINI_API_KEY", "")
