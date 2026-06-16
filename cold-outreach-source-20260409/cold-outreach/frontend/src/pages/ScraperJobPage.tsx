@@ -72,7 +72,7 @@ export default function ScraperJobPage() {
   const handleFindWebsite = async (idx: number, companyName: string) => {
     setFindingWebsite(prev => new Set(prev).add(idx))
     try {
-      const res = await findCompanyWebsite(companyName)
+      const res = await findCompanyWebsite(companyName, companies[idx]?.city)
       const url: string | null = res.data.website
       if (url) {
         setCompanies(prev => prev.map((c, i) => i === idx ? { ...c, website: url } : c))
@@ -90,7 +90,7 @@ export default function ScraperJobPage() {
   const handleFindPhone = async (idx: number, companyName: string) => {
     setFindingPhone(prev => new Set(prev).add(idx))
     try {
-      const res = await findCompanyPhone(companyName, companies[idx]?.website)
+      const res = await findCompanyPhone(companyName, companies[idx]?.website, companies[idx]?.city)
       const phone: string | null = res.data.phone
       if (phone) {
         setCompanies(prev => prev.map((c, i) => i === idx ? { ...c, phone } : c))
