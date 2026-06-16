@@ -396,24 +396,45 @@ async def find_phone_for_company(
         r'(?!\d)'
     )
 
+    # 已知無效號碼：591 proxy、104 人力銀行客服等
+    _BAD_DIGITS = {
+        '0972528588',  # 591 接洽代理電話
+        '0800070104',  # 104 人力銀行客服
+        '0800885104',
+        '0227128104',
+    }
+
+    def _is_valid_phone(digits: str) -> bool:
+        return digits not in _BAD_DIGITS
+
     def _extract_phone_from_html(html: str) -> _Opt[str]:
+        # 移除 104/1111/求職網站相關 HTML 區塊，避免抓到 HR 電話
+        for bad_domain in ('104.com.tw', '1111.com.tw', '518.com.tw', 'yes123.com.tw', '591.com'):
+            html = _re.sub(
+                rf'<[^>]*href=["\'][^"\']*{_re.escape(bad_domain)}[^"\']*["\'][^>]*>.*?(?=<(?:div|li|tr|article))',
+                '', html, flags=_re.S | _re.I,
+            )
+
         # 1. tel: 連結（Google Knowledge Panel 最常用此格式）
         for tel in _re.findall(r'href=["\']tel:([^"\']+)["\']', html):
             digits = _re.sub(r'\D', '', tel.lstrip('+'))
             if digits.startswith('886'):
                 digits = '0' + digits[3:]
-            if 8 <= len(digits) <= 10 and digits.startswith('0'):
+            if 8 <= len(digits) <= 10 and digits.startswith('0') and _is_valid_phone(digits):
                 return _fmt_phone_digits(digits)
         # 2. JSON-LD 結構化資料
         for script in _re.findall(r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>', html, _re.S):
             m = _TW_PHONE.search(script)
             if m:
-                return _re.sub(r'\s+', '-', m.group(1).strip())
+                digits = _re.sub(r'\D', '', m.group(1))
+                if _is_valid_phone(digits):
+                    return _re.sub(r'\s+', '-', m.group(1).strip())
         # 3. 純文字
         text = _re.sub(r'<[^>]+>', ' ', html)
-        m = _TW_PHONE.search(text)
-        if m:
-            return _re.sub(r'\s+', '-', m.group(1).strip())
+        for m in _TW_PHONE.finditer(text):
+            digits = _re.sub(r'\D', '', m.group(1))
+            if _is_valid_phone(digits):
+                return _re.sub(r'\s+', '-', m.group(1).strip())
         return None
 
     city_suffix = f" {city}" if city else ""
