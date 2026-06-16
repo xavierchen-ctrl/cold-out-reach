@@ -280,6 +280,35 @@ export const createCall = (leadId: string, data: Record<string, unknown>) =>
   api.post(`/leads/${leadId}/calls`, data)
 export const getCallStats = () => api.get('/calls/stats')
 
+// ── 提案管理 ───────────────────────────────────────────────────────────────────
+export const getProposals = () => api.get('/proposals')
+export const getLeadProposals = (leadId: string) => api.get(`/proposals/lead/${leadId}`)
+export const getProposal = (id: string) => api.get(`/proposals/${id}`)
+export const generateProposal = (data: {
+  lead_id: string
+  product_focus: string
+  budget_range: string
+  extra_context?: string
+  client_type?: string
+}) => api.post('/proposals/generate', data)
+export const updateProposal = (id: string, data: Record<string, unknown>) =>
+  api.patch(`/proposals/${id}`, data)
+export const deleteProposal = (id: string) => api.delete(`/proposals/${id}`)
+export const exportProposalPptx = (id: string) =>
+  api.get(`/proposals/${id}/export-pptx`, { responseType: 'blob' })
+
+// ── Proposal templates ────────────────────────────────────────────────────────
+export const listProposalTemplates = () => api.get('/proposals/templates')
+export const uploadProposalTemplate = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/proposals/templates/upload', form)
+}
+export const activateProposalTemplate = (filename: string) =>
+  api.put(`/proposals/templates/${encodeURIComponent(filename)}/activate`)
+export const deleteProposalTemplate = (filename: string) =>
+  api.delete(`/proposals/templates/${encodeURIComponent(filename)}`)
+
 // ── Round 4: 互動熱度 ──────────────────────────────────────────────────────────
 export const recalcEngagement = (leadId: string) =>
   api.post(`/leads/${leadId}/recalc_engagement`)
@@ -309,9 +338,62 @@ export const batchAnalyzeSignals = (lead_ids?: string[], all_with_website?: bool
 export const generateEmail = (data: {website_url: string, product: string, lead_id?: string, tone?: string}) =>
   api.post('/ai/generate-email', data)
 
-// ── 提案信生成 ─────────────────────────────────────────────────────────────────
-export const generateProposal = (data: { lead_id: string; product: string; tone?: string }) =>
+// ── 提案信生成（舊版 AI email，保留相容）────────────────────────────────────────
+export const generateProposalEmail = (data: { lead_id: string; product: string; tone?: string }) =>
   api.post('/ai/generate-proposal', data)
+
+// ── 簡報背景資料生成 ───────────────────────────────────────────────────────────
+export const generatePptBrief = (lead_id: string) =>
+  api.post('/ai/ppt-brief', { lead_id })
+
+// ── Google Slides 簡報建立 ────────────────────────────────────────────────────
+export const createGoogleSlides = (lead_id: string) =>
+  api.post('/ai/create-slides', { lead_id })
+
+// ── PPTX 模板上傳與生成 ───────────────────────────────────────────────────────
+export const uploadPptxTemplate = (file: File) => {
+  const form = new FormData()
+  form.append('file', file)
+  return api.post('/ai/upload-pptx-template', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+export const generatePptxDownload = (lead_id: string, extra_context?: string, use_template?: boolean) =>
+  api.post('/ai/generate-pptx', { lead_id, extra_context: extra_context || '', use_template: use_template ?? false }, { responseType: 'blob' })
+
+export const generatePptxContent = (lead_id: string, extra_context?: string, context_images?: string[], client_type?: string) =>
+  api.post('/ai/generate-pptx-content', { lead_id, extra_context: extra_context || '', use_template: false, context_images: context_images || [], client_type: client_type || 'b2c' })
+
+// ── 從名單生成提案 PPTX（python-pptx 16頁設計版）────────────────────────────────
+export const generateProposalFromLead = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/generate-from-lead', data, { responseType: 'blob' })
+
+export const generateChatGptPrompt = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/chatgpt-prompt', data)
+
+export const generateProposalAI = (data: {
+  lead_id: string
+  services: string[]
+  budget_range: string
+  extra_context?: string
+  year?: number
+}) => api.post('/proposal/generate-ai-from-lead', data)
+
+export const getProposalJobStatus = (jobId: string) =>
+  api.get(`/proposal/job/${jobId}`)
+
+export const downloadProposalJobFile = (jobId: string) =>
+  api.get(`/proposal/job/${jobId}/file`, { responseType: 'blob' })
 
 // ── 名單審核 ──────────────────────────────────────────────────────────────────
 export const getLeadApprovals = () => api.get('/approvals/leads')

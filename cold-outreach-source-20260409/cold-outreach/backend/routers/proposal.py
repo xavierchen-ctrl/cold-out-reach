@@ -1,17 +1,42 @@
+import asyncio
 import io
 import json
 import os
 import re
+import time
+import uuid
+import httpx
+from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from openai import OpenAI
+from sqlalchemy.orm import Session
 from auth import get_current_user
-from models import User
+from database import get_db
+from models import User, Lead
 
 router = APIRouter(prefix="/api/proposal", tags=["proposal"])
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+
+# ── Assistants API job store ───────────────────────────────────────────────────
+_jobs: dict = {}          # job_id → {status, message, bytes, filename, created_at}
+_executor = ThreadPoolExecutor(max_workers=3)
+_assistant_id: str | None = None
+
+_HTTP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+    )
+}
+
+
+def _strip_tags(html: str) -> str:
+    text = re.sub(r'<[^>]+>', ' ', html)
+    return re.sub(r'\s+', ' ', text).strip()
 
 # ── Colors ────────────────────────────────────────────────────────────────────
 C_NAVY   = (0x1B, 0x3A, 0x6B)
@@ -37,7 +62,6 @@ class ProposalRequest(BaseModel):
     monthly_budget: str
     special_notes: Optional[str] = None
     year: int = 2026
-    client_type: str = "b2c"
 
 
 @router.post("/generate")
@@ -49,10 +73,7 @@ async def generate_proposal(
         raise HTTPException(status_code=503, detail="OpenAI API key not configured")
 
     try:
-        if body.client_type == "b2b_biotech":
-            content = await _generate_content_b2b_biotech(body)
-        else:
-            content = await _generate_content_b2c(body)
+        content = await _generate_content_unified(body)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
 
@@ -65,178 +86,543 @@ async def generate_proposal(
     return StreamingResponse(
         io.BytesIO(pptx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+class GenerateFromLeadRequest(BaseModel):
+    lead_id: str
+    services: List[str] = ["廣告投放", "SEO優化"]
+    budget_range: str = "50-100萬/月"
+    extra_context: str = ""
+    year: int = 2026
+
+
+_BUDGET_MAP = {
+    "10-30萬/月": "30",
+    "30-50萬/月": "50",
+    "50-100萬/月": "100",
+    "100萬以上/月": "150",
+}
+
+
+def _get_or_create_assistant(client: OpenAI) -> str:
+    global _assistant_id
+    if _assistant_id:
+        try:
+            client.beta.assistants.retrieve(_assistant_id)
+            return _assistant_id
+        except Exception:
+            pass
+    assistant = client.beta.assistants.create(
+        name="潮網科技 提案設計師",
+        instructions=(
+            "你是潮網科技的資深數位行銷顧問兼專業簡報設計師。"
+            "當收到提案要求時，請用 python-pptx 製作視覺豐富、每頁版面皆不同的專業簡報。"
+            "程式碼必須完整可執行，存檔路徑為 /tmp/proposal.pptx。"
+        ),
+        tools=[{"type": "code_interpreter"}],
+        model="gpt-4o",
+    )
+    _assistant_id = assistant.id
+    return _assistant_id
+
+
+def _build_assistants_prompt(client_name: str, industry: str, budget: str,
+                              services: str, current_situation: str, year: int) -> str:
+    return f"""你是潮網科技的資深數位行銷顧問兼專業簡報設計師。
+
+【客戶資訊】
+客戶名稱：{client_name}
+產業：{industry}
+月預算：{budget}萬
+主推服務：{services}
+品牌現況：{current_situation}
+
+請完成以下任務：
+1. 根據客戶資訊生成完整的媒體提案內容（繁體中文）
+2. 用 python-pptx 製作一份專業的 {year} 年度數位行銷媒體提案 PowerPoint（16頁）
+3. 存檔為 /tmp/proposal.pptx
+
+【技術規格】
+- 簡報尺寸：13.33 英吋 × 7.5 英吋（16:9）
+- python-pptx 1.0.x：所有 EMU 值必須用 int() 轉換，shp.line.width = 0 表示無邊框
+- 使用 Presentation()、slide_layouts[6]（空白版型）
+
+【設計要求】
+- 每頁使用不同的版面佈局（嚴禁每頁設計相同）
+- 主色系：深藍 RGB(27,58,107) + 橘色 RGB(245,124,0) + 白色
+- 每頁都要有色塊、標題、內容；善用對角切版、左右分欄、卡片格狀等設計
+- 重要數據用大字號突出顯示
+- 所有文字使用繁體中文
+
+【頁面結構】
+第1頁：封面 — 深藍背景、客戶名稱大標、「{year} 年度數位行銷媒體提案」副標、潮網科技
+第2頁：品牌現況分析 — 3個優勢 + 現況說明
+第3頁：目標客群分析 — 3個族群卡片（年齡、需求、決策關鍵）
+第4頁：行銷問題診斷 — 3個問題診斷卡片
+第5頁：年度 KPI 目標 — 5個指標，大數字視覺化
+第6頁：全漏斗媒體策略 — Awareness → Consideration → Conversion → Retention 流程
+第7頁：整合媒體策略總表 — 表格（漏斗階段 / 媒體工具 / 溝通核心）
+第8頁：預算配置 — 條狀圖（Meta 30%、Google 20%、YouTube 10%、LinkedIn 15%、LINE 10%、KOL 10%、展會 5%）
+第9頁：Meta/Facebook/Instagram 廣告策略 — 3個受眾族群
+第10頁：Google/SEO 策略 — 3種關鍵字類型
+第11頁：YouTube 影音策略 — 3種內容角色
+第12頁：KOL/網紅行銷規劃 — Tier 1/2/3 三層架構
+第13頁：LinkedIn B2B 策略 — 目標職稱、廣告形式
+第14頁：LINE CRM 會員旅程 — Day 0 到 Day 30+ 時間軸
+第15頁：季度執行計畫 — Q1~Q4 橫向時程表
+第16頁：結語 — 深藍背景、總結訊息、下一步行動
+
+請直接撰寫並執行完整的 Python 程式碼（無需解釋），確認 /tmp/proposal.pptx 已成功儲存。"""
+
+
+def _do_assistants_job(job_id: str, prompt: str, filename: str) -> None:
+    try:
+        _jobs[job_id].update(status="running", message="AI 正在初始化...")
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        assistant_id = _get_or_create_assistant(client)
+
+        thread = client.beta.threads.create()
+        client.beta.threads.messages.create(
+            thread_id=thread.id, role="user", content=prompt
+        )
+
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id, assistant_id=assistant_id
+        )
+
+        # Poll with status updates
+        while run.status in ("queued", "in_progress", "cancelling"):
+            time.sleep(6)
+            run = client.beta.threads.runs.retrieve(
+                thread_id=thread.id, run_id=run.id
+            )
+            status_map = {
+                "queued": "AI 正在排隊中...",
+                "in_progress": "AI 正在撰寫程式碼並設計簡報，請稍候...",
+                "cancelling": "正在取消...",
+            }
+            _jobs[job_id]["message"] = status_map.get(run.status, run.status)
+
+        if run.status != "completed":
+            last_error = getattr(run, "last_error", None)
+            err_msg = str(last_error) if last_error else run.status
+            _jobs[job_id].update(status="error", message=f"生成失敗：{err_msg}")
+            return
+
+        # Find the PPTX file attachment
+        messages = client.beta.threads.messages.list(thread_id=thread.id)
+        pptx_bytes = None
+        for msg in messages.data:
+            if msg.role != "assistant":
+                continue
+            for attachment in (getattr(msg, "attachments", None) or []):
+                fid = getattr(attachment, "file_id", None)
+                if fid:
+                    pptx_bytes = client.files.content(fid).read()
+                    break
+            if pptx_bytes:
+                break
+
+        if not pptx_bytes:
+            _jobs[job_id].update(status="error", message="找不到生成的 PPTX 檔案，請重試")
+            return
+
+        _jobs[job_id].update(
+            status="done",
+            message="簡報已完成！",
+            pptx_bytes=pptx_bytes,
+            filename=filename,
+            done_at=time.time(),
+        )
+
+    except Exception as e:
+        _jobs[job_id].update(status="error", message=str(e))
+
+
+@router.post("/chatgpt-prompt")
+async def get_chatgpt_prompt(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=6, follow_redirects=True, headers=_HTTP_HEADERS) as hc:
+                res = await hc.get(url)
+                website_summary = _strip_tags(res.text)[:1000]
+        except Exception:
+            pass
+
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+
+    parts = []
+    if lead.industry:      parts.append(f"產業：{lead.industry}")
+    if lead.company_size:  parts.append(f"規模：{lead.company_size}")
+    if lead.city:          parts.append(f"城市：{lead.city}")
+    if tech_str:           parts.append(f"數位工具：{tech_str}")
+    if ad_str:             parts.append(f"廣告現況：{ad_str}")
+    if website_summary:    parts.append(f"官網：{website_summary}")
+    if body.extra_context.strip(): parts.append(f"補充：{body.extra_context.strip()}")
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    services_str = "、".join(body.services)
+
+    budget_int = int(monthly_budget)
+    if budget_int <= 30:
+        budget_guidance = """【預算策略指引 — 小預算（30萬以下）】
+月預算有限，建議聚焦 2-3 個核心管道，不宜分散：
+- 必選：Meta FB/IG 廣告（品牌+效果兼顧）、Google Search（捕捉主動需求）
+- 可視情況加入：LINE OA 基礎經營
+- 暫緩：YouTube 大規模投放、KOL、LinkedIn、展會（等預算擴大再納入）
+- 重點：把有限預算集中在轉換率最高的管道，追求 ROAS 最大化"""
+    elif budget_int <= 50:
+        budget_guidance = """【預算策略指引 — 中小預算（30-50萬）】
+建議 3-4 個管道組合，兼顧品效：
+- 核心：Meta 廣告 + Google Ads
+- 擴充：可加入 KOL 微網紅（口碑擴散）或 LINE CRM（會員經營）擇一
+- 可視需求加：YouTube 短影音（不做大規模投放）
+- 暫緩：LinkedIn、大型展會"""
+    elif budget_int <= 100:
+        budget_guidance = """【預算策略指引 — 中大預算（50-100萬）】
+建議 4-5 個管道全數位整合：
+- 核心：Meta + Google + YouTube 影音廣告
+- 加入：KOL 行銷（口碑+觸及）、LINE CRM 自動化（會員留存）
+- 視產業：若有 B2B 需求可加 LinkedIn 廣告
+- 暫緩：大型展會、Podcast 冠名（除非產業特別適合）"""
+    else:
+        budget_guidance = """【預算策略指引 — 大預算（100萬以上）】
+全管道整合，建立品牌資產與多觸點佈局：
+- 全數位：Meta + Google + YouTube + KOL + LinkedIn + LINE CRM
+- 線下延伸：展會、研討會、Podcast 冠名、媒體原生廣告
+- 重點：各管道設定明確 KPI（品牌曝光 vs 效果轉換），避免預算重疊浪費
+- 建議設立整合儀表板，跨管道歸因分析"""
+
+    prompt = f"""請幫我製作一份專業的數位行銷媒體提案 PowerPoint（產生可下載的 .pptx 檔案，繁體中文）。
+
+【客戶資訊】
+客戶名稱：{lead.company_name}
+產業：{lead.industry or "未知"}
+月預算：{monthly_budget}萬
+主推服務：{services_str}
+品牌現況：
+{current_situation}
+
+{budget_guidance}
+
+【建議涵蓋的內容方向（依客戶情況取捨）】
+- 封面：客戶名稱、年度、潮網科技
+- 品牌現況分析
+- 目標客群分析
+- 行銷問題診斷
+- 年度 KPI 目標
+- 全漏斗媒體策略
+- 整合媒體策略總表
+- 預算配置
+- 各媒體管道策略（依上方預算策略指引，只納入適合的管道，每個管道獨立一頁說明策略與執行方式）
+- 季度執行計畫
+- 結語與下一步行動
+
+請根據客戶的產業、預算規模與主推服務，自行判斷哪些內容值得獨立一頁、哪些可以合併，產生最合適的頁數。
+請產生完整可下載的 PPTX 檔案。"""
+
+    return {"prompt": prompt}
+
+
+@router.post("/generate-ai-from-lead")
+async def generate_ai_from_lead(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    # Scrape website for context
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=8, follow_redirects=True, headers=_HTTP_HEADERS) as hc:
+                res = await hc.get(url)
+                website_summary = _strip_tags(res.text)[:1500]
+        except Exception:
+            pass
+
+    # Build current_situation
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+
+    parts = []
+    if lead.industry:   parts.append(f"產業：{lead.industry}")
+    if lead.company_size: parts.append(f"規模：{lead.company_size}")
+    if lead.city:       parts.append(f"城市：{lead.city}")
+    if tech_str:        parts.append(f"數位工具：{tech_str}")
+    if ad_str:          parts.append(f"廣告現況：{ad_str}")
+    if website_summary: parts.append(f"官網：{website_summary}")
+    if body.extra_context.strip(): parts.append(f"補充：{body.extra_context.strip()}")
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    services_str = "、".join(body.services)
+    prompt = _build_assistants_prompt(
+        client_name=lead.company_name,
+        industry=lead.industry or "未知",
+        budget=monthly_budget,
+        services=services_str,
+        current_situation=current_situation,
+        year=body.year,
+    )
+
+    job_id = str(uuid.uuid4())
+    filename = f"{lead.company_name}_{body.year}_媒體提案.pptx"
+    _jobs[job_id] = {
+        "status": "queued",
+        "message": "已加入佇列，即將開始...",
+        "filename": filename,
+        "created_at": time.time(),
+    }
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _do_assistants_job, job_id, prompt, filename)
+
+    return {"job_id": job_id}
+
+
+@router.get("/job/{job_id}")
+async def get_job_status(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return {"status": job["status"], "message": job["message"]}
+
+
+@router.get("/job/{job_id}/file")
+async def download_job_file(
+    job_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    job = _jobs.get(job_id)
+    if not job or job["status"] != "done":
+        raise HTTPException(status_code=404, detail="File not ready")
+    pptx_bytes = job["pptx_bytes"]
+    filename = job["filename"]
+    _jobs.pop(job_id, None)
+    return StreamingResponse(
+        io.BytesIO(pptx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
+    )
+
+
+@router.post("/generate-from-lead")
+async def generate_from_lead(
+    body: GenerateFromLeadRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not OPENAI_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+
+    lead = db.query(Lead).filter(Lead.id == body.lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    monthly_budget = _BUDGET_MAP.get(body.budget_range, "100")
+
+    # Scrape website for context
+    website_summary = ""
+    if lead.website:
+        try:
+            url = lead.website if lead.website.startswith("http") else f"https://{lead.website}"
+            async with httpx.AsyncClient(timeout=10, follow_redirects=True, headers=_HTTP_HEADERS) as client:
+                res = await client.get(url)
+                website_summary = _strip_tags(res.text)[:2000]
+        except Exception:
+            pass
+
+    # Build current_situation from enriched lead data
+    tech = lead.tech_signals or {}
+    ad = lead.ad_signals or {}
+    tech_str = "、".join(k for k, v in [("GA4", tech.get("ga4")), ("GTM", tech.get("gtm")), ("Meta Pixel", tech.get("meta_pixel"))] if v)
+    ad_str = "、".join(k for k, v in [("Meta 廣告", ad.get("meta", {}).get("has_ads")), ("Google 廣告", ad.get("google_ads", {}).get("has_ads"))] if v)
+    score = lead.enriched_score or 0
+
+    parts = []
+    if lead.industry:
+        parts.append(f"產業類別：{lead.industry}")
+    if lead.company_size:
+        parts.append(f"公司規模：{lead.company_size}")
+    if lead.city:
+        parts.append(f"所在城市：{lead.city}")
+    if tech_str:
+        parts.append(f"已使用數位追蹤工具：{tech_str}")
+    if ad_str:
+        parts.append(f"目前廣告投放：{ad_str}")
+    if score:
+        parts.append(f"含金量評分：{score}/100")
+    if website_summary:
+        parts.append(f"官網內容：{website_summary}")
+    if body.extra_context.strip():
+        parts.append(f"補充說明：{body.extra_context.strip()}")
+
+    current_situation = "\n".join(parts) or f"{lead.company_name} 的品牌與行銷現況"
+
+    proposal_req = ProposalRequest(
+        client_name=lead.company_name,
+        industry=lead.industry or "未知",
+        current_situation=current_situation,
+        services=body.services,
+        monthly_budget=monthly_budget,
+        special_notes=None,
+        year=body.year,
+    )
+
+    try:
+        content = await _generate_content_unified(proposal_req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI 生成失敗：{str(e)}")
+
+    try:
+        pptx_bytes = _build_pptx(content, proposal_req)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"PPTX 建立失敗：{str(e)}")
+
+    filename = f"{lead.company_name}_{body.year}_媒體提案.pptx"
+    return StreamingResponse(
+        io.BytesIO(pptx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
     )
 
 
 # ── AI content generation ─────────────────────────────────────────────────────
 
-async def _generate_content_b2c(body: ProposalRequest) -> dict:
+async def _generate_content_unified(body: ProposalRequest) -> dict:
     services_str = "、".join(body.services)
     special = f"\n特殊需求：{body.special_notes}" if body.special_notes else ""
     budget_num = re.sub(r"[^\d]", "", body.monthly_budget) or "100"
 
-    prompt = f"""你是潮網科技的資深數位行銷顧問，請根據以下資訊生成媒體提案內容（繁體中文）。
+    prompt = f"""你是潮網科技的資深數位行銷顧問，請根據以下資訊生成完整媒體提案內容（繁體中文）。
 
 客戶：{body.client_name} | 產業：{body.industry}
 月預算：{budget_num}萬 | 主推服務：{services_str}
 品牌現況：{body.current_situation}{special}
 
-輸出嚴格 JSON（根據客戶產業調整所有內容，勿使用預設範例）：
+本提案涵蓋所有行銷管道（Meta、Google、YouTube、KOL、LinkedIn、LINE CRM、展會、內容資產等），
+客戶可依實際需求自行刪減不適用的部分。請根據客戶產業特性生成最貼切的內容（勿使用預設範例）。
+
+輸出嚴格 JSON：
 
 {{
-  "subtitle": "副標題（20字內，描述品牌轉型方向）",
-  "brand_strengths": ["商品線優勢1", "商品線優勢2", "商品線優勢3"],
-  "brand_d2c": "D2C經營現況一句話說明（40字內）",
+  "subtitle": "副標題（20字內，描述品牌/業務成長方向）",
+  "brand_strengths": ["品牌/產品優勢1", "品牌/產品優勢2", "品牌/產品優勢3"],
+  "brand_d2c": "品牌直客/通路/商業模式現況說明（40字內）",
   "market_segments": [
-    {{"age": "25-40歲", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
-    {{"age": "35-55歲", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
-    {{"age": "50+", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}}
+    {{"age": "族群特徵1", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
+    {{"age": "族群特徵2", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}},
+    {{"age": "族群特徵3", "name": "族群名稱", "needs": ["需求1", "需求2"], "decision": "決策關鍵"}}
   ],
   "problems": [
-    {{"title": "流量依賴廣告", "desc": "缺乏自生流量，獲客成本隨演算法波動"}},
-    {{"title": "缺乏品牌搜尋量", "desc": "消費者以類別搜尋，品牌指名度低"}},
-    {{"title": "會員回購率不足", "desc": "初購後流失率高，缺乏生命週期自動化"}}
+    {{"title": "問題標題1", "desc": "問題說明（30字內）"}},
+    {{"title": "問題標題2", "desc": "問題說明"}},
+    {{"title": "問題標題3", "desc": "問題說明"}}
   ],
   "kpis": [
-    {{"label": "品牌聲量成長", "value": "+50%"}},
-    {{"label": "官網流量增幅", "value": "+80%"}},
-    {{"label": "會員總數成長", "value": "+40%"}},
-    {{"label": "廣告平均ROAS", "value": "4.0+"}},
-    {{"label": "會員回購率提升", "value": "+20%"}}
+    {{"label": "KPI名稱1", "value": "+50%"}},
+    {{"label": "KPI名稱2", "value": "+80%"}},
+    {{"label": "KPI名稱3", "value": "+40%"}},
+    {{"label": "KPI名稱4", "value": "4.0+"}},
+    {{"label": "KPI名稱5", "value": "+20%"}}
   ],
   "media_strategy": [
     {{"stage": "認知 (Awareness)", "tools": "媒體工具（逗號分隔）", "message": "溝通核心（20字）"}},
     {{"stage": "考慮 (Consideration)", "tools": "媒體工具", "message": "溝通核心"}},
     {{"stage": "轉換 (Conversion)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "回購 (Retention)", "tools": "媒體工具", "message": "溝通核心"}}
+    {{"stage": "回購/留存 (Retention)", "tools": "媒體工具", "message": "溝通核心"}}
   ],
   "meta_audiences": [
-    {{"name": "核心族群1", "products": "主打商品", "creative": "廣告創意方向（15字）"}},
-    {{"name": "核心族群2", "products": "主打商品", "creative": "廣告創意方向"}},
-    {{"name": "核心族群3", "products": "主打商品", "creative": "廣告創意方向"}}
+    {{"name": "受眾族群1", "products": "主打商品/服務", "creative": "廣告創意方向（15字）"}},
+    {{"name": "受眾族群2", "products": "主打商品/服務", "creative": "廣告創意方向"}},
+    {{"name": "受眾族群3", "products": "主打商品/服務", "creative": "廣告創意方向"}}
   ],
   "google_keywords": [
-    {{"type": "推薦比較類", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "高CTR（點擊率）"}},
-    {{"type": "功效解決類", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "精準需求鎖定"}},
-    {{"type": "品牌防禦類", "keywords": "品牌詞1、品牌詞2", "effect": "守住回購訂單"}}
+    {{"type": "關鍵字類型1", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "效益說明"}},
+    {{"type": "關鍵字類型2", "keywords": "關鍵字1、關鍵字2、關鍵字3", "effect": "效益說明"}},
+    {{"type": "關鍵字類型3", "keywords": "品牌詞1、品牌詞2", "effect": "效益說明"}}
   ],
   "youtube_experts": [
-    {{"role": "營養師／專業人士", "content": "內容方向（20字）"}},
-    {{"role": "醫師／學術背書", "content": "內容方向"}},
-    {{"role": "教練／KOL", "content": "內容方向"}}
+    {{"role": "內容角色1", "content": "內容方向（20字）"}},
+    {{"role": "內容角色2", "content": "內容方向"}},
+    {{"role": "內容角色3", "content": "內容方向"}}
   ],
   "kol_tiers": [
     {{"tier": "Tier 1  大型KOL", "purpose": "流量爆發", "desc": "25字以內說明"}},
     {{"tier": "Tier 2  專業人士", "purpose": "信任轉化", "desc": "25字以內說明"}},
     {{"tier": "Tier 3  微網紅(KOC)", "purpose": "社群擴散", "desc": "25字以內說明"}}
   ],
-  "crm_steps": [
-    {{"day": "Day 0",   "title": "綁定會員",   "desc": "領入會禮券"}},
-    {{"day": "Day 1-7", "title": "產品使用教學", "desc": "建立使用習慣"}},
-    {{"day": "Day 14",  "title": "知識推播",   "desc": "增加品牌黏度"}},
-    {{"day": "Day 25",  "title": "補貨提醒",   "desc": "發放回購優惠券"}},
-    {{"day": "Day 30+", "title": "再次購買",   "desc": "升級會員等級"}}
-  ],
-  "must_buy": ["Meta FB/IG 影音廣告、ASC購物廣告", "Google Search / PMax 效果最大化", "YouTube TrueView 引流", "LINE LAP成效廣告、官方帳號導購"],
-  "bonus_resources": ["健康媒體原生文章合作（早安健康、康健）", "KOL 開箱體驗合作", "Podcast 節目冠名"],
-  "quarterly_plan": [
-    {{"quarter": "Q1  擴大新客", "goal": "衝刺官網新客數", "strategy": "Meta 50% / Google 30% / KOL獲客"}},
-    {{"quarter": "Q2  品牌信任", "goal": "建立搜尋量與好感", "strategy": "YouTube 專家影音 / 內容合作"}},
-    {{"quarter": "Q3  深耕會員", "goal": "提高忠誠度與回購", "strategy": "LINE CRM 自動化 / APP推播"}},
-    {{"quarter": "Q4  業績爆發", "goal": "雙11與年終節慶爆發", "strategy": "PMax拉高 / 再行銷全開 / 團購KOL"}}
-  ],
-  "closing_message": "結語（80字以內，說明品牌需從買流量升級為全漏斗成長模式，強調品牌資產+會員資產）"
-}}"""
-
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
-        response_format={"type": "json_object"},
-    )
-    return json.loads(response.choices[0].message.content)
-
-
-async def _generate_content_b2b_biotech(body: ProposalRequest) -> dict:
-    services_str = "、".join(body.services)
-    special = f"\n特殊需求：{body.special_notes}" if body.special_notes else ""
-    budget_num = re.sub(r"[^\d]", "", body.monthly_budget) or "500"
-
-    prompt = f"""你是潮網科技的資深 B2B 生技產業數位行銷顧問，請根據以下資訊生成生技/製藥媒體提案內容（繁體中文）。
-
-客戶：{body.client_name} | 產業：{body.industry}
-年度預算：{budget_num}萬 | 主推服務：{services_str}
-公司現況：{body.current_situation}{special}
-
-輸出嚴格 JSON（根據客戶生技產業特性調整所有內容，聚焦 B2B 決策者導向行銷）：
-
-{{
-  "subtitle": "副標題（20字內，描述技術商業化方向）",
-  "tech_highlights": ["技術亮點1", "技術亮點2", "技術亮點3"],
-  "business_model": "商業模式說明（40字內，說明授權/合作/直銷等模式）",
-  "market_problems": [
-    {{"title": "痛點標題1", "desc": "市場痛點說明（30字內）"}},
-    {{"title": "痛點標題2", "desc": "市場痛點說明"}},
-    {{"title": "痛點標題3", "desc": "市場痛點說明"}}
-  ],
-  "challenges": [
-    {{"title": "挑戰標題1", "desc": "說明（30字內）"}},
-    {{"title": "挑戰標題2", "desc": "說明"}},
-    {{"title": "挑戰標題3", "desc": "說明"}}
-  ],
-  "kpis": [
-    {{"label": "潛在合作夥伴接觸數", "value": "+50%"}},
-    {{"label": "官網專業流量", "value": "+80%"}},
-    {{"label": "LinkedIn 觸及決策者", "value": "+60%"}},
-    {{"label": "展會潛客數", "value": "+40%"}},
-    {{"label": "內容下載轉換率", "value": "+30%"}}
-  ],
-  "b2b_journey": [
-    {{"stage": "Awareness", "action": "認知建立", "desc": "說明（20字）"}},
-    {{"stage": "Consideration", "action": "評估考量", "desc": "說明（20字）"}},
-    {{"stage": "Validation", "action": "技術驗證", "desc": "說明（20字）"}},
-    {{"stage": "Decision", "action": "合作決策", "desc": "說明（20字）"}}
-  ],
-  "media_strategy": [
-    {{"stage": "認知 (Awareness)", "tools": "媒體工具", "message": "溝通核心（20字）"}},
-    {{"stage": "考慮 (Consideration)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "驗證 (Validation)", "tools": "媒體工具", "message": "溝通核心"}},
-    {{"stage": "決策 (Decision)", "tools": "媒體工具", "message": "溝通核心"}}
-  ],
   "linkedin_targeting": {{
-    "roles": ["職稱1", "職稱2", "職稱3"],
-    "companies": ["公司類型1", "公司類型2"],
+    "roles": ["目標職稱1", "目標職稱2", "目標職稱3"],
+    "companies": ["目標公司類型1", "目標公司類型2"],
     "ad_formats": ["廣告形式1", "廣告形式2"]
   }},
   "seo_keywords": [
-    {{"type": "技術解決方案", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
-    {{"type": "法規合規", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
-    {{"type": "品牌防禦", "keywords": "品牌詞1、品牌詞2", "intent": "品牌認知"}}
+    {{"type": "SEO類型1", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
+    {{"type": "SEO類型2", "keywords": "關鍵字1、關鍵字2", "intent": "搜尋意圖"}},
+    {{"type": "SEO類型3", "keywords": "品牌詞1、品牌詞2", "intent": "品牌認知"}}
   ],
   "thought_leadership": [
-    {{"format": "白皮書/研究報告", "topic": "主題（20字）", "goal": "目標（15字）"}},
-    {{"format": "網路研討會/Webinar", "topic": "主題", "goal": "目標"}},
-    {{"format": "專業媒體投稿", "topic": "主題", "goal": "目標"}}
+    {{"format": "內容形式1", "topic": "主題（20字）", "goal": "目標（15字）"}},
+    {{"format": "內容形式2", "topic": "主題", "goal": "目標"}},
+    {{"format": "內容形式3", "topic": "主題", "goal": "目標"}}
   ],
   "events": [
-    {{"name": "展會名稱1", "strategy": "參展策略", "tactic": "具體戰術"}},
-    {{"name": "展會名稱2", "strategy": "參展策略", "tactic": "具體戰術"}}
+    {{"name": "活動/展會名稱1", "strategy": "參與策略", "tactic": "具體戰術"}},
+    {{"name": "活動/展會名稱2", "strategy": "參與策略", "tactic": "具體戰術"}}
+  ],
+  "crm_steps": [
+    {{"day": "Day 0",   "title": "初始接觸",   "desc": "行動說明"}},
+    {{"day": "Day 1-7", "title": "培育互動",   "desc": "行動說明"}},
+    {{"day": "Day 14",  "title": "深化關係",   "desc": "行動說明"}},
+    {{"day": "Day 25",  "title": "促進轉換",   "desc": "行動說明"}},
+    {{"day": "Day 30+", "title": "持續回購/合作", "desc": "行動說明"}}
   ],
   "content_assets": [
-    {{"type": "技術白皮書", "desc": "說明（25字）"}},
-    {{"type": "案例研究", "desc": "說明"}},
-    {{"type": "產品規格書", "desc": "說明"}}
+    {{"type": "內容資產類型1", "desc": "說明（25字）"}},
+    {{"type": "內容資產類型2", "desc": "說明"}},
+    {{"type": "內容資產類型3", "desc": "說明"}}
   ],
-  "must_buy": ["LinkedIn 決策者廣告 (Sponsored Content + InMail)", "Google Search 技術關鍵字廣告", "生技專業媒體原生廣告", "會展現場數位廣告"],
-  "bonus_resources": ["Podcast 生技產業節目冠名", "學術研討會數位贊助", "Geo-fencing 展場精準投放"],
+  "must_buy": ["必購媒體1", "必購媒體2", "必購媒體3", "必購媒體4"],
+  "bonus_resources": ["加值資源1", "加值資源2", "加值資源3"],
   "quarterly_plan": [
-    {{"quarter": "Q1  品牌建立", "goal": "建立專業品牌形象", "strategy": "LinkedIn + 內容行銷 + 官網優化"}},
-    {{"quarter": "Q2  潛客開發", "goal": "觸及目標決策者", "strategy": "ABM 廣告 + 白皮書下載 + Webinar"}},
-    {{"quarter": "Q3  關係深化", "goal": "推進合作商談", "strategy": "案例研究 + 個人化 Email + 展會"}},
-    {{"quarter": "Q4  合作轉化", "goal": "促成合作協議", "strategy": "決策者再行銷 + ROI 報告 + 媒體公關"}}
+    {{"quarter": "Q1  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q2  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q3  策略方向", "goal": "目標說明", "strategy": "執行策略"}},
+    {{"quarter": "Q4  策略方向", "goal": "目標說明", "strategy": "執行策略"}}
   ],
-  "closing_message": "結語（80字以內，說明生技品牌需建立專業信任度並精準觸及決策者，強調科學驗證+商業價值的整合溝通策略）"
+  "closing_message": "結語（80字以內，說明整合行銷策略的核心價值與預期成效）"
 }}"""
 
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -966,10 +1352,7 @@ def _build_pptx(content: dict, body: ProposalRequest) -> bytes:
     prs.slide_height = int(Inches(7.5))
     layout = prs.slide_layouts[6]  # blank
 
-    if body.client_type == "b2b_biotech":
-        _build_pptx_b2b_biotech(prs, layout, content, body, budget_num)
-    else:
-        _build_pptx_b2c(prs, layout, content, body, budget_num)
+    _build_pptx_unified(prs, layout, content, body, budget_num)
 
     buf = io.BytesIO()
     prs.save(buf)
@@ -1103,3 +1486,46 @@ def _build_pptx_b2b_biotech(prs, layout, content: dict, body: ProposalRequest, b
 
     # Slide 16: Closing
     _slide_b2b_closing(prs, layout, client_name, content.get("closing_message", ""), year)
+
+
+def _build_pptx_unified(prs, layout, content: dict, body: ProposalRequest, budget_num: int):
+    year = body.year
+    client_name = body.client_name
+
+    budget_rows = [
+        ("Meta FB/IG 廣告",   "30%", f"{int(budget_num*0.30)}"),
+        ("Google Ads / PMax", "20%", f"{int(budget_num*0.20)}"),
+        ("YouTube 影音",       "10%", f"{int(budget_num*0.10)}"),
+        ("LinkedIn 廣告",     "15%", f"{int(budget_num*0.15)}"),
+        ("LINE CRM / LAP",    "10%", f"{int(budget_num*0.10)}"),
+        ("KOL / 內容行銷",    "10%", f"{int(budget_num*0.10)}"),
+        ("展會 / 研討會",      "5%",  f"{int(budget_num*0.05)}"),
+    ]
+    budget_note = (
+        "Meta + Google 主力效果媒體，覆蓋消費者全旅程。"
+        "LinkedIn 精準觸及 B2B 決策者。"
+        "KOL + 內容行銷建立品牌信任。"
+        "LINE CRM 強化回購與客戶留存。"
+    )
+
+    _slide_cover(prs, layout, client_name, content.get("subtitle", ""), year)
+    _slide_brand(prs, layout, content.get("brand_strengths", []), content.get("brand_d2c", ""))
+    _slide_market(prs, layout, content.get("market_segments", []), year)
+    _slide_problems(prs, layout, content.get("problems", []))
+    _slide_kpis(prs, layout, content.get("kpis", []), year)
+    _slide_funnel(prs, layout)
+    _slide_strategy(prs, layout, content.get("media_strategy", []))
+    _slide_budget(prs, layout, budget_rows, str(budget_num), budget_note)
+    _slide_meta(prs, layout, content.get("meta_audiences", []))
+    _slide_google(prs, layout, content.get("google_keywords", []))
+    _slide_youtube(prs, layout, content.get("youtube_experts", []))
+    _slide_kol(prs, layout, content.get("kol_tiers", []))
+    _slide_b2b_linkedin(prs, layout, content.get("linkedin_targeting", {}))
+    _slide_b2b_seo(prs, layout, content.get("seo_keywords", []))
+    _slide_b2b_thought_leadership(prs, layout, content.get("thought_leadership", []))
+    _slide_b2b_events(prs, layout, content.get("events", []))
+    _slide_crm(prs, layout, content.get("crm_steps", []))
+    _slide_b2b_content_assets(prs, layout, content.get("content_assets", []))
+    _slide_resources(prs, layout, content.get("must_buy", []), content.get("bonus_resources", []))
+    _slide_quarterly(prs, layout, content.get("quarterly_plan", []))
+    _slide_closing(prs, layout, client_name, content.get("closing_message", ""), year)

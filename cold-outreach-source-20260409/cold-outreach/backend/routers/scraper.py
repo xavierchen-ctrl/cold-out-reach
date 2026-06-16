@@ -182,6 +182,10 @@ _WEBSITE_BLACKLIST = {
     # 產業公會 / 協會目錄
     'icaa.org.tw', 'icaa.tw', 'tca.org.tw', 'teema.org.tw',
     'taitra.org.tw', 'taiwantrade.com', 'taiwantrade.com.tw',
+    # 房產平台（建設公司名稱搜尋時易命中，非官網）
+    '591.com.tw', '591.com', 'newhouse.591.com.tw', 'rent.591.com.tw',
+    'sinyi.com.tw', 'house.com.tw', 'easyhouse.com.tw', 'land.com.tw',
+    'realty.com.tw', 'rakuya.com.tw', 'yungching.com.tw',
 }
 
 _SEARCH_HEADERS = {
