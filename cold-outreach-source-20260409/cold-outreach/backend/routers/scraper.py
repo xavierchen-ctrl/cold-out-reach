@@ -473,10 +473,38 @@ async def find_phone_for_company(
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
 
-    # 2. Bing（比 Google SERP 較不封鎖伺服器 IP）
+    # 2. 住展 myhousing.com.tw（台灣新建案專門目錄，有結構化電話）
+    try:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
+            resp = await client.get(
+                f"https://www.myhousing.com.tw/projects/search?keyword={_urlparse.quote(q)}",
+                timeout=10,
+            )
+            for m in _TW_PHONE.finditer(_re.sub(r'<[^>]+>', ' ', resp.text)):
+                digits = _re.sub(r'\D', '', m.group(1))
+                if _is_valid_phone(digits):
+                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+    except Exception as e:
+        logger.warning(f"find-phone myhousing error for {q!r}: {e}")
+
+    # 3. 樂居 leju.com.tw（新建案資料聚合，含接待中心電話）
+    try:
+        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
+            resp = await client.get(
+                f"https://www.leju.com.tw/newhouse/list?keyword={_urlparse.quote(q)}",
+                timeout=10,
+            )
+            for m in _TW_PHONE.finditer(_re.sub(r'<[^>]+>', ' ', resp.text)):
+                digits = _re.sub(r'\D', '', m.group(1))
+                if _is_valid_phone(digits):
+                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
+    except Exception as e:
+        logger.warning(f"find-phone leju error for {q!r}: {e}")
+
+    # 4. Bing（比 Google SERP 較不封鎖伺服器 IP，加「接待中心」觸發 Knowledge Card）
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
-            for query in [f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
+            for query in [f"{q}{city_suffix} 接待中心 電話", f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
                 try:
                     resp = await client.get(
                         f"https://www.bing.com/search?q={_urlparse.quote(query)}&setlang=zh-TW&cc=TW",
@@ -490,10 +518,10 @@ async def find_phone_for_company(
     except Exception as e:
         logger.warning(f"find-phone bing error for {q!r}: {e}")
 
-    # 3. DuckDuckGo
+    # 5. DuckDuckGo
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=15) as client:
-            for query in [f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
+            for query in [f"{q}{city_suffix} 接待中心 電話", f"{q}{city_suffix} 電話", f"{q} 聯絡電話"]:
                 try:
                     resp = await client.get(
                         f"https://html.duckduckgo.com/html/?q={_urlparse.quote(query)}",
@@ -507,7 +535,7 @@ async def find_phone_for_company(
     except Exception as e:
         logger.warning(f"find-phone ddg error for {q!r}: {e}")
 
-    # 4. 台灣黃頁
+    # 7. 台灣黃頁
     try:
         async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
             resp = await client.get(
@@ -522,7 +550,7 @@ async def find_phone_for_company(
     except Exception as e:
         logger.warning(f"find-phone yellow.com.tw error for {q!r}: {e}")
 
-    # 5. 直接爬公司已知網站
+    # 8. 直接爬公司已知網站
     if website:
         try:
             urls_to_try = [website]
