@@ -396,12 +396,13 @@ async def find_phone_for_company(
         r'(?!\d)'
     )
 
-    # 已知無效號碼：591 proxy、104 人力銀行客服等
+    # 已知無效號碼：591 proxy、媒體/平台客服等
     _BAD_DIGITS = {
         '0972528588',  # 591 接洽代理電話
         '0800070104',  # 104 人力銀行客服
         '0800885104',
         '0227128104',
+        '0287973579',  # 住展雜誌編輯部電話（非建案本身）
     }
 
     def _is_valid_phone(digits: str) -> bool:
@@ -503,20 +504,6 @@ async def find_phone_for_company(
                     return {"phone": _fmt_phone_digits(digits_only)}
         except Exception as e:
             logger.warning(f"find-phone gemini error for {q!r}: {e}")
-
-    # 2. 住展 myhousing.com.tw（台灣新建案專門目錄，有結構化電話）
-    try:
-        async with httpx.AsyncClient(headers=_SEARCH_HEADERS, follow_redirects=True, timeout=12) as client:
-            resp = await client.get(
-                f"https://www.myhousing.com.tw/projects/search?keyword={_urlparse.quote(q)}",
-                timeout=10,
-            )
-            for m in _TW_PHONE.finditer(_re.sub(r'<[^>]+>', ' ', resp.text)):
-                digits = _re.sub(r'\D', '', m.group(1))
-                if _is_valid_phone(digits):
-                    return {"phone": _re.sub(r'\s+', '-', m.group(1).strip())}
-    except Exception as e:
-        logger.warning(f"find-phone myhousing error for {q!r}: {e}")
 
     # 3. 樂居 leju.com.tw（新建案資料聚合，含接待中心電話）
     try:
