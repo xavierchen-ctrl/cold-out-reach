@@ -21,7 +21,7 @@ from routers import auth, leads, activities, gmail, ai, stats, scraper, scoring,
 from routers import templates, email_scheduler, tracking, reports
 from routers import contacts, tags, attachments, ab_test, webhooks, notifications, analytics, keyword_tracker, weekly_report
 from routers import cadence, call_log, enrich, icp, signals, teams, approvals, proposal
-from routers import proposals
+from routers import proposals, ragic
 
 
 @asynccontextmanager
@@ -298,6 +298,7 @@ app.include_router(teams.router)
 app.include_router(approvals.router)
 app.include_router(proposal.router)
 app.include_router(proposals.router)
+app.include_router(ragic.router)
 
 
 # ── One-time DB init endpoint (safe: only creates if not exists) ───────────────

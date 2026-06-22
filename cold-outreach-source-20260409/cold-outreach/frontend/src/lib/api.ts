@@ -64,6 +64,55 @@ export const importCSV = (file: File) => {
 export const downloadLeadTemplate = () =>
   api.get('/leads/template', { responseType: 'blob' })
 
+// ── Ragic 中台 ────────────────────────────────────────────────────────────────
+export interface RagicRow {
+  _ragicId: number
+  公司: string
+  聯絡人: string
+  Email: string
+  電話: string
+  官網: string
+  接洽人: string
+  狀態: string
+}
+
+export interface RagicBulkCheckResult {
+  company_name: string
+  in_existing: boolean
+  in_new: boolean
+  existing_am?: string | null
+  new_am?: string | null
+  error?: string
+}
+
+export const ragicGetExistingClients = (params: {
+  company_name?: string; tax_id?: string; am?: string;
+  client_department?: string; client_contact?: string;
+}) => api.post<{ status: string; data: RagicRow[]; update_at: string }>(
+  '/ragic/get-existing-clients', params,
+)
+
+export const ragicGetNewClients = (params: {
+  company_name?: string; am?: string; client_contact?: string;
+  email?: string; phone?: string;
+}) => api.post<{ status: string; data: RagicRow[]; update_at: string }>(
+  '/ragic/get-new-clients', params,
+)
+
+export const ragicUpsertNewClient = (data: {
+  company_name: string; client_contact: string; phone: string; am: string;
+  email?: string; website?: string; status?: string; industry?: string;
+  title?: string; mobile?: string; remark?: string; department?: string;
+  client_department?: string; media?: string;
+}) => api.post<{ status: string; data: { mode: 'add' | 'edit'; ragic_data_id: number } }>(
+  '/ragic/upsert-new-client', data,
+)
+
+export const ragicBulkCheck = (company_names: string[]) =>
+  api.post<{ results: RagicBulkCheckResult[] }>('/ragic/bulk-check', { company_names })
+
+export const ragicHealth = () => api.get<{ ok: boolean; token_set: boolean; detail?: string }>('/ragic/health')
+
 // ── Activities ────────────────────────────────────────────────────────────────
 export const getActivities = (leadId: string) =>
   api.get(`/leads/${leadId}/activities`)
