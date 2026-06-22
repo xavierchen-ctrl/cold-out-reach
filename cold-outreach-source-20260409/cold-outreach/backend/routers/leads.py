@@ -305,23 +305,68 @@ def download_template(current_user: User = Depends(get_current_user)):
 @router.post("/import")
 async def import_csv(
     file: UploadFile = File(...),
+    check_ragic: bool = Query(False, description="是否在匯入前對 Ragic 既有客戶/陌開表去重"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     content = await file.read()
     text = content.decode("utf-8-sig")
     reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
+
+    # 先解析每列
+    parsed: list = []
+    errors: list = []
+    for i, row in enumerate(rows):
+        company = row.get("company_name") or row.get("公司名稱") or row.get("company")
+        if not company:
+            errors.append(f"Row {i+2}: missing company_name")
+            continue
+        parsed.append((i, row, company.strip()))
+
+    # 若啟用 Ragic 去重，先批次查
+    skipped_ragic: list = []
+    ragic_lookup: dict = {}
+    if check_ragic and parsed:
+        try:
+            from routers.ragic import _post as _ragic_post
+            import asyncio as _asyncio
+
+            async def _check(name: str):
+                try:
+                    e_res, n_res = await _asyncio.gather(
+                        _ragic_post("get_existing_client_table", {"company_name": name}),
+                        _ragic_post("get_new_client_table", {"company_name": name}),
+                        return_exceptions=True,
+                    )
+                    e_rows = [] if isinstance(e_res, Exception) else e_res.get("data", [])
+                    n_rows = [] if isinstance(n_res, Exception) else n_res.get("data", [])
+                    return name, len(e_rows) > 0, len(n_rows) > 0
+                except Exception:
+                    return name, False, False
+
+            sem = _asyncio.Semaphore(8)
+
+            async def _wrapped(name):
+                async with sem:
+                    return await _check(name)
+
+            unique = list({c for _, _, c in parsed})
+            checks = await _asyncio.gather(*[_wrapped(n) for n in unique])
+            for name, in_e, in_n in checks:
+                if in_e or in_n:
+                    ragic_lookup[name] = ("existing" if in_e else "new")
+        except Exception as e:
+            errors.append(f"Ragic 去重失敗（已忽略繼續匯入）: {e}")
 
     created = 0
-    errors = []
-    for i, row in enumerate(reader):
+    for i, row, company in parsed:
+        if company in ragic_lookup:
+            skipped_ragic.append({"company_name": company, "in_table": ragic_lookup[company]})
+            continue
         try:
-            company = row.get("company_name") or row.get("公司名稱") or row.get("company")
-            if not company:
-                errors.append(f"Row {i+2}: missing company_name")
-                continue
             lead = Lead(
-                company_name=company.strip(),
+                company_name=company,
                 department=(row.get("department") or row.get("部門") or "").strip() or None,
                 contact_name=(row.get("contact_name") or row.get("聯絡人") or "").strip() or None,
                 title=(row.get("title") or row.get("職稱") or "").strip() or None,
@@ -340,4 +385,8 @@ async def import_csv(
             errors.append(f"Row {i+2}: {str(e)}")
 
     db.commit()
-    return {"created": created, "errors": errors}
+    return {
+        "created": created,
+        "errors": errors,
+        "skipped_ragic": skipped_ragic,
+    }

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck } from '@/lib/api'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2 } from 'lucide-react'
+import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, Database } from 'lucide-react'
 
 interface ScrapedCompany {
   company_name: string
@@ -33,6 +33,29 @@ export default function ScraperJobPage() {
   const [findingPhone, setFindingPhone] = useState<Set<number>>(new Set())
   const [bulkFinding, setBulkFinding] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 })
+  // Ragic 重複檢查：company_name -> 'existing' | 'new' | 'none'
+  const [ragicStatus, setRagicStatus] = useState<Map<string, 'existing' | 'new'>>(new Map())
+  const [ragicChecking, setRagicChecking] = useState(false)
+
+  const handleRagicCheck = async () => {
+    if (companies.length === 0) return
+    setRagicChecking(true)
+    try {
+      const names = companies.map(c => c.company_name).filter(Boolean)
+      const res = await ragicBulkCheck(names)
+      const next = new Map<string, 'existing' | 'new'>()
+      for (const r of res.data.results) {
+        if (r.in_existing) next.set(r.company_name, 'existing')
+        else if (r.in_new) next.set(r.company_name, 'new')
+      }
+      setRagicStatus(next)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      alert(err?.response?.data?.detail || 'Ragic 檢查失敗')
+    } finally {
+      setRagicChecking(false)
+    }
+  }
 
   useEffect(() => {
     if (!id) return
@@ -169,17 +192,31 @@ export default function ScraperJobPage() {
 
         <div className="flex items-center gap-3">
           {!isPostsMode && (
-            <Button
-              variant="outline"
-              onClick={handleBulkFindPhone}
-              disabled={bulkFinding || companies.filter(c => !c.phone).length === 0}
-              className="shadow-sm"
-            >
-              {bulkFinding
-                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />查找中 {bulkProgress.done}/{bulkProgress.total}</>
-                : <><Search className="w-4 h-4 mr-2" />批量查找電話 ({companies.filter(c => !c.phone).length})</>
-              }
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                onClick={handleRagicCheck}
+                disabled={ragicChecking || companies.length === 0}
+                className="shadow-sm"
+                title="批次查詢 Ragic 既有客戶 / 陌開表"
+              >
+                {ragicChecking
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Ragic 檢查中</>
+                  : <><Database className="w-4 h-4 mr-2" />檢查 Ragic 重複{ragicStatus.size > 0 ? ` (${ragicStatus.size})` : ''}</>
+                }
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleBulkFindPhone}
+                disabled={bulkFinding || companies.filter(c => !c.phone).length === 0}
+                className="shadow-sm"
+              >
+                {bulkFinding
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />查找中 {bulkProgress.done}/{bulkProgress.total}</>
+                  : <><Search className="w-4 h-4 mr-2" />批量查找電話 ({companies.filter(c => !c.phone).length})</>
+                }
+              </Button>
+            </>
           )}
           <Button onClick={handleImport} disabled={importing} className="shadow-sm">
             <Download className="w-4 h-4 mr-2" />
@@ -296,7 +333,15 @@ export default function ScraperJobPage() {
                           <div className="flex items-start gap-2">
                             <Building2 className="w-4 h-4 text-indigo-500 mt-0.5 shrink-0" />
                             <div>
-                              <div className="font-semibold text-gray-900 leading-tight">{c.company_name}</div>
+                              <div className="font-semibold text-gray-900 leading-tight flex items-center gap-1.5 flex-wrap">
+                                {c.company_name}
+                                {ragicStatus.get(c.company_name) === 'existing' && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-normal" title="已在 Ragic 既有客戶表">既有客戶</span>
+                                )}
+                                {ragicStatus.get(c.company_name) === 'new' && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-normal" title="已在 Ragic 陌開表">陌開中</span>
+                                )}
+                              </div>
                               {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}
                             </div>
                           </div>

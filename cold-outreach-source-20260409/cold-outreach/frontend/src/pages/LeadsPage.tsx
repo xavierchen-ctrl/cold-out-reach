@@ -519,18 +519,25 @@ function ApprovalTab({ onResolved }: { onResolved: () => void }) {
 }
 
 // ── CSV Import Tab ────────────────────────────────────────────────────────────
+type CsvImportResult = {
+  created: number
+  errors: string[]
+  skipped_ragic?: { company_name: string; in_table: 'existing' | 'new' }[]
+}
+
 function CsvImportTab({ onImported }: { onImported: () => void }) {
   const [file, setFile] = useState<File | null>(null)
-  const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null)
+  const [result, setResult] = useState<CsvImportResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [checkRagic, setCheckRagic] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleImport = async () => {
     if (!file) return
     setLoading(true)
     try {
-      const res = await importCSV(file)
+      const res = await importCSV(file, checkRagic)
       setResult(res.data)
       onImported()
     } catch (e: unknown) {
@@ -595,15 +602,47 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
         />
       </div>
       {file && (
-        <Button className="mt-4 w-full" onClick={handleImport} disabled={loading}>
-          {loading ? '匯入中...' : '開始匯入'}
-        </Button>
+        <>
+          <label className="mt-4 flex items-center gap-2 text-sm cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={checkRagic}
+              onChange={e => setCheckRagic(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            <span>匯入前對 Ragic 中台去重（自動跳過既有客戶與陌開中名單）</span>
+          </label>
+          <Button className="mt-3 w-full" onClick={handleImport} disabled={loading}>
+            {loading ? '匯入中...' : '開始匯入'}
+          </Button>
+        </>
       )}
       {result && (
-        <div className="mt-4 p-4 rounded-lg bg-muted text-sm">
+        <div className="mt-4 p-4 rounded-lg bg-muted text-sm space-y-2">
           <p className="font-medium">✅ 匯入完成：新增 {result.created} 筆</p>
+          {result.skipped_ragic && result.skipped_ragic.length > 0 && (
+            <div>
+              <p className="text-amber-700 font-medium">
+                跳過 {result.skipped_ragic.length} 筆（已在 Ragic 中台）：
+              </p>
+              <ul className="pl-4 text-xs text-muted-foreground space-y-0.5 mt-1 max-h-40 overflow-y-auto">
+                {result.skipped_ragic.map((s, i) => (
+                  <li key={i}>
+                    {s.company_name}
+                    <span className={`ml-2 inline-block text-[10px] px-1.5 py-0.5 rounded ${
+                      s.in_table === 'existing'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-orange-100 text-orange-700'
+                    }`}>
+                      {s.in_table === 'existing' ? '既有客戶' : '陌開中'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {result.errors.length > 0 && (
-            <div className="mt-2">
+            <div>
               <p className="text-destructive font-medium">錯誤 {result.errors.length} 筆：</p>
               <ul className="list-disc pl-4 text-xs text-muted-foreground space-y-0.5 mt-1">
                 {result.errors.slice(0, 5).map((e, i) => <li key={i}>{e}</li>)}

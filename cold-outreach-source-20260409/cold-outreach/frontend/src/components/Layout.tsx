@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
-import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X, Presentation } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X, Presentation, Database } from 'lucide-react'
 
 export default function Layout() {
   const { user, signOut } = useAuth()
@@ -32,6 +32,7 @@ export default function Layout() {
           { to: '/analytics', icon: <BarChart3 className="w-4 h-4" />, label: '智能分析' },
           { to: '/reports', icon: <FileBarChart2 className="w-4 h-4" />, label: 'AI 週報' },
           { to: '/proposal', icon: <Presentation className="w-4 h-4" />, label: '提案生成' },
+          { to: '/ragic', icon: <Database className="w-4 h-4" />, label: 'Ragic 中台' },
           { to: '/settings', icon: <Settings className="w-4 h-4" />, label: '設定' },
         ].map(item => (
           <NavLink

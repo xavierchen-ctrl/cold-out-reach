@@ -10,6 +10,7 @@ import {
   getAttachments, uploadAttachment, downloadAttachment, deleteAttachment,
   getLeadCadences, getCalls, createCall, recalcEngagement,
   analyzeSignals, generateEmail, generateChatGptPrompt,
+  ragicUpsertNewClient,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, EmailTemplate, Contact, Tag, Attachment, CadenceEnrollment, CallLog, CallOutcome, CALL_OUTCOME_LABELS, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, ACTIVITY_LABELS } from '@/types'
@@ -20,7 +21,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
-import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame, Paperclip, X, Copy, CheckCheck, Loader2, FileText as FileTextIcon } from 'lucide-react'
+import { ArrowLeft, Mail, Sparkles, Star, Wand2, Clock, Plus, Trash2, Download, Upload, Tag as TagIcon, ExternalLink, Phone, Flame, Paperclip, X, Copy, CheckCheck, Loader2, FileText as FileTextIcon, Database } from 'lucide-react'
 import { format } from 'date-fns'
 
 const CADENCE_STEP_ICONS: Record<string, string> = {
@@ -63,6 +64,42 @@ export default function LeadDetailPage() {
   const [scoring, setScoring] = useState(false)
   const [noteContent, setNoteContent] = useState('')
   const [hasAddedNote, setHasAddedNote] = useState(false)
+  const [ragicSyncing, setRagicSyncing] = useState(false)
+
+  const handleSyncToRagic = async () => {
+    if (!lead) return
+    if (!lead.phone) {
+      alert('Ragic 陌開表需要電話號碼，請先補上電話再同步')
+      return
+    }
+    if (!lead.contact_name) {
+      alert('Ragic 陌開表需要聯絡人姓名，請先補上聯絡人再同步')
+      return
+    }
+    if (!confirm(`要將「${lead.company_name}」同步到 Ragic 陌開表嗎？\n接洽人會帶入：${user?.name || '(未知)'}`)) return
+
+    setRagicSyncing(true)
+    try {
+      const res = await ragicUpsertNewClient({
+        company_name: lead.company_name,
+        client_contact: lead.contact_name,
+        phone: lead.phone,
+        am: user?.name || 'unknown',
+        email: lead.email || undefined,
+        website: lead.website || undefined,
+        title: lead.title || undefined,
+        industry: lead.industry || undefined,
+        department: lead.department || undefined,
+      })
+      const mode = res.data.data.mode === 'add' ? '新增' : '更新'
+      alert(`${mode}成功！Ragic ID: ${res.data.data.ragic_data_id}`)
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      alert(err?.response?.data?.detail || '同步失敗')
+    } finally {
+      setRagicSyncing(false)
+    }
+  }
   const [activeTab, setActiveTab] = useState<'info' | 'contacts' | 'attachments' | 'cadence' | 'calls'>('info')
 
   // Signals / 含金量
@@ -509,6 +546,13 @@ export default function LeadDetailPage() {
             <Button size="sm" variant="outline" onClick={() => setShowProposalModal(true)}>
               <span className="md:mr-1.5">📊</span>
               <span className="hidden md:inline">生成提案簡報</span>
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleSyncToRagic} disabled={ragicSyncing} title="新增或更新到 Ragic 陌開表（接洽人帶入當前使用者）">
+              {ragicSyncing
+                ? <Loader2 className="w-3.5 h-3.5 md:mr-1.5 animate-spin" />
+                : <Database className="w-3.5 h-3.5 md:mr-1.5" />
+              }
+              <span className="hidden md:inline">{ragicSyncing ? '同步中...' : '同步到 Ragic'}</span>
             </Button>
             <Button size="sm" onClick={() => setShowEmail(true)}>
               <Mail className="w-3.5 h-3.5 md:mr-1.5" />

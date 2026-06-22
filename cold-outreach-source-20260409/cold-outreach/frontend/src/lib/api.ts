@@ -55,10 +55,10 @@ export const updateLead = (id: string, data: Record<string, unknown>) =>
 export const deleteLead = (id: string) => api.delete(`/leads/${id}`)
 export const updateLeadStatus = (id: string, status: string) =>
   api.patch(`/leads/${id}/status`, { status })
-export const importCSV = (file: File) => {
+export const importCSV = (file: File, checkRagic = false) => {
   const form = new FormData()
   form.append('file', file)
-  return api.post('/leads/import', form)
+  return api.post(`/leads/import${checkRagic ? '?check_ragic=true' : ''}`, form)
 }
 
 export const downloadLeadTemplate = () =>
