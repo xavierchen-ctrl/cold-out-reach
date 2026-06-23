@@ -36,3 +36,9 @@ Thumbs.db
 
 # ── Docker 暫存 ───────────────────────────────────────────────────────────────
 *.log
+
+# ── Firebase ──────────────────────────────────────────────────────────────────
+frontend/.firebase/
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
