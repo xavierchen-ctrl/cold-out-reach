@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import re
 from typing import Optional, List
 from uuid import UUID
@@ -10,6 +11,7 @@ from database import get_db
 from models import User, Lead, LeadActivity, LeadStatus, ActivityType, UserRole, LeadTag, Tag, EmailOpen, EmailClick, CallLog, PendingLeadApproval
 from schemas import LeadCreate, LeadUpdate, LeadStatusUpdate, LeadOut, ActivityOut
 from auth import get_current_user, get_visible_user_ids
+from dedup import build_conflict_index, check_conflict, add_to_index, normalize_company
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
@@ -362,6 +364,8 @@ def download_template(current_user: User = Depends(get_current_user)):
 async def import_csv(
     file: UploadFile = File(...),
     check_ragic: bool = Query(False, description="是否在匯入前對 Ragic 既有客戶/陌開表去重"),
+    confirmed: bool = Query(False, description="已確認衝突處理"),
+    conflict_actions: Optional[str] = Query(None, description="JSON: {公司名: approve|skip}"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -415,34 +419,108 @@ async def import_csv(
         except Exception as e:
             errors.append(f"Ragic 去重失敗（已忽略繼續匯入）: {e}")
 
-    created = 0
+    def _row_fields(row, company):
+        return dict(
+            company_name=company,
+            department=(row.get("department") or row.get("部門") or "").strip() or None,
+            contact_name=(row.get("contact_name") or row.get("聯絡人") or "").strip() or None,
+            title=(row.get("title") or row.get("職稱") or "").strip() or None,
+            email=(row.get("email") or row.get("Email") or "").strip() or None,
+            phone=(row.get("phone") or row.get("電話") or "").strip() or None,
+            industry=(row.get("industry") or row.get("產業") or "").strip() or None,
+            city=(row.get("city") or row.get("城市") or "").strip() or None,
+            company_size=(row.get("company_size") or row.get("公司規模") or "").strip() or None,
+            source=(row.get("source") or row.get("來源") or "csv_import").strip(),
+        )
+
+    # ── 防呆：與系統現有名單比對（相似名 / 同統編 / 同網域）──────────────
+    index = build_conflict_index(db)
+    actions = {}
+    if conflict_actions:
+        try:
+            actions = json.loads(conflict_actions)
+        except Exception:
+            actions = {}
+
+    to_create = []      # 全新
+    conflicts = []      # 需使用者決定
+    skipped_dup = 0
+    batch_seen = set()
+
     for i, row, company in parsed:
         if company in ragic_lookup:
             skipped_ragic.append({"company_name": company, "in_table": ragic_lookup[company]})
             continue
+        fields = _row_fields(row, company)
+        norm = normalize_company(company)
+        if norm and norm in batch_seen:
+            skipped_dup += 1
+            continue
+        # CSV 無官網欄位，以公司名 / 部門比對（同統編也無欄位）
+        status, matched, reason = check_conflict(
+            index, company, website=None, department=fields.get("department")
+        )
+        if status == "new":
+            to_create.append(fields)
+            if norm:
+                batch_seen.add(norm)
+            add_to_index(index, company, department=fields.get("department"))
+        elif status == "duplicate":
+            skipped_dup += 1
+            if norm:
+                batch_seen.add(norm)
+        else:
+            conflicts.append({
+                "company_name": company,
+                "reason": reason,
+                "matched_id": matched["id"],
+                "matched_company": matched["company_name"],
+                "matched_department": matched.get("department"),
+                "_fields": fields,
+            })
+            if norm:
+                batch_seen.add(norm)
+
+    # 有衝突且尚未確認 → 回傳給前端逐筆決定（不寫入）
+    if conflicts and not confirmed:
+        return {
+            "needs_review": True,
+            "conflicts": [{k: v for k, v in c.items() if k != "_fields"} for c in conflicts],
+            "new_count": len(to_create),
+            "skipped_ragic": skipped_ragic,
+            "errors": errors,
+        }
+
+    created = 0
+    pending = 0
+    for fields in to_create:
         try:
-            lead = Lead(
-                company_name=company,
-                department=(row.get("department") or row.get("部門") or "").strip() or None,
-                contact_name=(row.get("contact_name") or row.get("聯絡人") or "").strip() or None,
-                title=(row.get("title") or row.get("職稱") or "").strip() or None,
-                email=(row.get("email") or row.get("Email") or "").strip() or None,
-                phone=(row.get("phone") or row.get("電話") or "").strip() or None,
-                industry=(row.get("industry") or row.get("產業") or "").strip() or None,
-                city=(row.get("city") or row.get("城市") or "").strip() or None,
-                company_size=(row.get("company_size") or row.get("公司規模") or "").strip() or None,
-                source=(row.get("source") or row.get("來源") or "csv_import").strip(),
+            db.add(Lead(
+                **fields,
                 assigned_to=current_user.id if current_user.role == UserRole.sales else None,
                 status=LeadStatus.new,
-            )
-            db.add(lead)
+            ))
             created += 1
         except Exception as e:
-            errors.append(f"Row {i+2}: {str(e)}")
+            errors.append(f"{fields['company_name']}: {str(e)}")
+
+    for c in conflicts:
+        if actions.get(c["company_name"]) == "approve":
+            db.add(PendingLeadApproval(
+                submitted_by=current_user.id,
+                lead_data=c["_fields"],
+                conflict_company=c["company_name"],
+                conflict_lead_id=c["matched_id"],
+            ))
+            pending += 1
+        else:
+            skipped_dup += 1
 
     db.commit()
     return {
         "created": created,
+        "pending_approval": pending,
+        "skipped_duplicate": skipped_dup,
         "errors": errors,
         "skipped_ragic": skipped_ragic,
     }

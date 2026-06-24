@@ -251,3 +251,5 @@ class ScraperImportRequest(BaseModel):
     assigned_to: Optional[UUID] = None
     email_only: Optional[bool] = False
     indices: Optional[List[int]] = None
+    confirmed: Optional[bool] = False                 # 已確認衝突處理
+    conflict_actions: Optional[dict] = None           # {公司名: "approve"|"skip"}

@@ -55,10 +55,19 @@ export const updateLead = (id: string, data: Record<string, unknown>) =>
 export const deleteLead = (id: string) => api.delete(`/leads/${id}`)
 export const updateLeadStatus = (id: string, status: string) =>
   api.patch(`/leads/${id}/status`, { status })
-export const importCSV = (file: File, checkRagic = false) => {
+export const importCSV = (
+  file: File,
+  checkRagic = false,
+  opts?: { confirmed?: boolean; conflict_actions?: Record<string, 'approve' | 'skip'> }
+) => {
   const form = new FormData()
   form.append('file', file)
-  return api.post(`/leads/import${checkRagic ? '?check_ragic=true' : ''}`, form)
+  const params = new URLSearchParams()
+  if (checkRagic) params.set('check_ragic', 'true')
+  if (opts?.confirmed) params.set('confirmed', 'true')
+  if (opts?.conflict_actions) params.set('conflict_actions', JSON.stringify(opts.conflict_actions))
+  const qs = params.toString()
+  return api.post(`/leads/import${qs ? `?${qs}` : ''}`, form)
 }
 
 export const downloadLeadTemplate = () =>
@@ -201,8 +210,26 @@ export const runScraper = (source: string, url?: string, keyword?: string, indus
 export const getScraperJobs = () => api.get('/scraper/jobs')
 export const previewScraperJob = (jobId: string) =>
   api.get(`/scraper/preview/${jobId}`)
-export const importScraperJob = (jobId: string, assigned_to?: string, email_only?: boolean, indices?: number[]) =>
-  api.post(`/scraper/import/${jobId}`, { assigned_to, email_only, indices })
+export const importScraperJob = (
+  jobId: string,
+  assigned_to?: string,
+  email_only?: boolean,
+  indices?: number[],
+  opts?: { confirmed?: boolean; conflict_actions?: Record<string, 'approve' | 'skip'> }
+) =>
+  api.post(`/scraper/import/${jobId}`, {
+    assigned_to, email_only, indices,
+    confirmed: opts?.confirmed, conflict_actions: opts?.conflict_actions,
+  })
+
+// 衝突項目型別（爬蟲/CSV 匯入時與系統現有名單相似）
+export interface ImportConflict {
+  company_name: string
+  reason: string
+  matched_id: string
+  matched_company: string
+  matched_department?: string | null
+}
 export const findCompanyWebsite = (q: string, city?: string) =>
   api.get(`/scraper/find-website`, { params: { q, ...(city ? { city } : {}) } })
 export const findCompanyPhone = (q: string, website?: string, city?: string) =>

@@ -18,9 +18,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
-from models import User, Lead, LeadStatus, ScraperJob, ScraperJobStatus, UserRole
+from models import User, Lead, LeadStatus, ScraperJob, ScraperJobStatus, UserRole, PendingLeadApproval
 from schemas import ScraperRunRequest, ScraperJobOut, ScraperImportRequest, ScrapedCompany
 from auth import get_current_user
+from dedup import build_conflict_index, check_conflict, add_to_index, normalize_company
 
 logger = logging.getLogger(__name__)
 
@@ -736,38 +737,58 @@ def import_job(
         idx_set = set(body.indices)
         companies = [c for i, c in enumerate(companies) if i in idx_set]
 
-    created = 0
-    skipped = 0
+    # ── 防呆：與系統現有名單比對（相似名 / 同統編 / 同網域）──────────────
+    index = build_conflict_index(db)
+    actions = body.conflict_actions or {}
+
+    to_create = []          # 全新公司，可直接建立
+    to_fill = []            # (existing_id, company) 同公司同部門，補空白欄位
+    conflicts = []          # 與現有相似，需使用者決定
+    batch_seen = set()
+
     for c in companies:
-        name = c.get("company_name", "").strip()
+        name = (c.get("company_name") or "").strip()
         if not name:
             continue
-        # Dedup: skip if same company_name already exists (regardless of source)
-        existing = db.query(Lead).filter(
-            Lead.company_name == name,
-        ).first()
-        if existing:
-            # 已存在：補填空白欄位（不覆蓋有值的）
-            updated = False
-            for field, val in [
-                ("email", c.get("email")),
-                ("phone", c.get("phone")),
-                ("contact_name", c.get("contact_name")),
-                ("title", c.get("title")),
-                ("website", c.get("website")),
-                ("city", c.get("city")),
-                ("company_size", c.get("company_size")),
-            ]:
-                if val and not getattr(existing, field, None):
-                    setattr(existing, field, val)
-                    updated = True
-            if updated:
-                created += 1
-            else:
-                skipped += 1
-            continue
-        lead = Lead(
-            company_name=name,
+        norm = normalize_company(name)
+        if norm and norm in batch_seen:
+            continue        # 同一批內重複公司
+        status, matched, reason = check_conflict(index, name, website=c.get("website"))
+        if status == "new":
+            to_create.append(c)
+            if norm:
+                batch_seen.add(norm)
+            add_to_index(index, name, website=c.get("website"))
+        elif status == "duplicate":
+            to_fill.append((matched["id"], c))
+            if norm:
+                batch_seen.add(norm)
+        else:  # conflict
+            conflicts.append({
+                "company_name": name,
+                "reason": reason,
+                "matched_id": matched["id"],
+                "matched_company": matched["company_name"],
+                "matched_department": matched.get("department"),
+                "_company": c,
+            })
+            if norm:
+                batch_seen.add(norm)
+
+    # 有衝突且尚未確認 → 回傳給前端讓使用者逐筆決定（不寫入）
+    if conflicts and not body.confirmed:
+        return {
+            "needs_review": True,
+            "conflicts": [{k: v for k, v in c.items() if k != "_company"} for c in conflicts],
+            "new_count": len(to_create),
+            "fill_count": len(to_fill),
+        }
+
+    created, skipped, pending = 0, 0, 0
+
+    for c in to_create:
+        db.add(Lead(
+            company_name=(c.get("company_name") or "").strip(),
             contact_name=c.get("contact_name"),
             title=c.get("title"),
             email=c.get("email"),
@@ -780,12 +801,55 @@ def import_job(
             assigned_to=None,
             status=LeadStatus.claiming,
             notes=c.get("notes"),
-        )
-        db.add(lead)
+        ))
         created += 1
 
+    for (lead_id, c) in to_fill:
+        existing = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not existing:
+            continue
+        updated = False
+        for field, val in [
+            ("email", c.get("email")), ("phone", c.get("phone")),
+            ("contact_name", c.get("contact_name")), ("title", c.get("title")),
+            ("website", c.get("website")), ("city", c.get("city")),
+            ("company_size", c.get("company_size")),
+        ]:
+            if val and not getattr(existing, field, None):
+                setattr(existing, field, val)
+                updated = True
+        if updated:
+            created += 1
+        else:
+            skipped += 1
+
+    # 衝突項目：依使用者決定（approve → 送審核；其餘 → 跳過）
+    for c in conflicts:
+        if actions.get(c["company_name"]) == "approve":
+            comp = c["_company"]
+            db.add(PendingLeadApproval(
+                submitted_by=current_user.id,
+                lead_data={
+                    "company_name": (comp.get("company_name") or "").strip(),
+                    "contact_name": comp.get("contact_name"),
+                    "title": comp.get("title"),
+                    "email": comp.get("email"),
+                    "phone": comp.get("phone"),
+                    "website": comp.get("website"),
+                    "industry": comp.get("industry") or "數位行銷",
+                    "city": comp.get("city"),
+                    "company_size": comp.get("company_size"),
+                    "source": source_label,
+                },
+                conflict_company=c["company_name"],
+                conflict_lead_id=c["matched_id"],
+            ))
+            pending += 1
+        else:
+            skipped += 1
+
     db.commit()
-    return {"created": created, "skipped": skipped}
+    return {"created": created, "skipped": skipped, "pending_approval": pending}
 
 
 # ── Helper ─────────────────────────────────────────────────────────────────────

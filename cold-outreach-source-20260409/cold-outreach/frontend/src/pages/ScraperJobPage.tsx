@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck, ImportConflict } from '@/lib/api'
+import ConflictReviewDialog from '@/components/ConflictReviewDialog'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, Database } from 'lucide-react'
 
@@ -27,6 +28,9 @@ export default function ScraperJobPage() {
   const [loading, setLoading] = useState(true)
   const [companies, setCompanies] = useState<ScrapedCompany[]>([])
   const [importing, setImporting] = useState(false)
+  const [conflicts, setConflicts] = useState<ImportConflict[]>([])
+  const [conflictNewCount, setConflictNewCount] = useState(0)
+  const [showConflict, setShowConflict] = useState(false)
   const [error, setError] = useState('')
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set())
   const [findingWebsite, setFindingWebsite] = useState<Set<number>>(new Set())
@@ -151,13 +155,39 @@ export default function ScraperJobPage() {
     setBulkFinding(false)
   }
 
+  const importIndices = () => (someSelected ? Array.from(selectedIndices) : undefined)
+
   const handleImport = async () => {
     if (!id) return
     setImporting(true)
     try {
-      const indices = someSelected ? Array.from(selectedIndices) : undefined
-      const res = await importScraperJob(id, undefined, undefined, indices)
+      const res = await importScraperJob(id, undefined, undefined, importIndices())
+      if (res.data?.needs_review) {
+        setConflicts(res.data.conflicts || [])
+        setConflictNewCount(res.data.new_count || 0)
+        setShowConflict(true)
+        return
+      }
       alert(`✅ 匯入完成：新增/更新 ${res.data.created} 筆，跳過 ${res.data.skipped} 筆`)
+      navigate('/leads')
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || '匯入失敗')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleConfirmConflicts = async (actions: Record<string, 'approve' | 'skip'>) => {
+    if (!id) return
+    setImporting(true)
+    try {
+      const res = await importScraperJob(id, undefined, undefined, importIndices(), {
+        confirmed: true,
+        conflict_actions: actions,
+      })
+      setShowConflict(false)
+      const pending = res.data.pending_approval || 0
+      alert(`✅ 匯入完成：新增/更新 ${res.data.created} 筆，跳過 ${res.data.skipped} 筆${pending ? `，送審核 ${pending} 筆` : ''}`)
       navigate('/leads')
     } catch (err: any) {
       alert(err?.response?.data?.detail || '匯入失敗')
@@ -454,6 +484,15 @@ export default function ScraperJobPage() {
           </table>
         </div>
       </main>
+
+      <ConflictReviewDialog
+        open={showConflict}
+        conflicts={conflicts}
+        newCount={conflictNewCount}
+        loading={importing}
+        onCancel={() => setShowConflict(false)}
+        onConfirm={handleConfirmConflicts}
+      />
     </div>
   )
 }

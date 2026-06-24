@@ -7,8 +7,9 @@ import {
   scoreLead, scoreBatch, bulkStatus, bulkDelete, getSequences, enrollSequence, enrichLushaPhone, enrichLushaStatus,
   exportCsv, getUsers, getTags, addLeadTags, getICPs, batchAnalyzeSignals,
   getTemplates, bulkSendEmail,
-  getLeadApprovals, getLeadApprovalCount, reviewLeadApproval,
+  getLeadApprovals, getLeadApprovalCount, reviewLeadApproval, ImportConflict,
 } from '@/lib/api'
+import ConflictReviewDialog from '@/components/ConflictReviewDialog'
 import { useAuth } from '@/hooks/useAuth'
 import { Lead, LeadStatus, Activity, ScraperJob, User, Tag, ICPProfile, EmailTemplate, LEAD_STATUS_LABELS, LEAD_STATUS_COLORS, SCRAPER_SOURCES, SCRAPER_DEFAULT_URLS, ACTIVITY_LABELS } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -523,6 +524,8 @@ type CsvImportResult = {
   created: number
   errors: string[]
   skipped_ragic?: { company_name: string; in_table: 'existing' | 'new' }[]
+  pending_approval?: number
+  skipped_duplicate?: number
 }
 
 function CsvImportTab({ onImported }: { onImported: () => void }) {
@@ -531,6 +534,9 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
   const [loading, setLoading] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const [checkRagic, setCheckRagic] = useState(true)
+  const [conflicts, setConflicts] = useState<ImportConflict[]>([])
+  const [conflictNewCount, setConflictNewCount] = useState(0)
+  const [showConflict, setShowConflict] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleImport = async () => {
@@ -538,6 +544,27 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
     setLoading(true)
     try {
       const res = await importCSV(file, checkRagic)
+      if (res.data?.needs_review) {
+        setConflicts(res.data.conflicts || [])
+        setConflictNewCount(res.data.new_count || 0)
+        setShowConflict(true)
+        return
+      }
+      setResult(res.data)
+      onImported()
+    } catch (e: unknown) {
+      alert((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || '匯入失敗')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleConfirmConflicts = async (actions: Record<string, 'approve' | 'skip'>) => {
+    if (!file) return
+    setLoading(true)
+    try {
+      const res = await importCSV(file, checkRagic, { confirmed: true, conflict_actions: actions })
+      setShowConflict(false)
       setResult(res.data)
       onImported()
     } catch (e: unknown) {
@@ -619,7 +646,11 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
       )}
       {result && (
         <div className="mt-4 p-4 rounded-lg bg-muted text-sm space-y-2">
-          <p className="font-medium">✅ 匯入完成：新增 {result.created} 筆</p>
+          <p className="font-medium">
+            ✅ 匯入完成：新增 {result.created} 筆
+            {result.pending_approval ? `、送審核 ${result.pending_approval} 筆` : ''}
+            {result.skipped_duplicate ? `、跳過重複 ${result.skipped_duplicate} 筆` : ''}
+          </p>
           {result.skipped_ragic && result.skipped_ragic.length > 0 && (
             <div>
               <p className="text-amber-700 font-medium">
@@ -651,6 +682,15 @@ function CsvImportTab({ onImported }: { onImported: () => void }) {
           )}
         </div>
       )}
+
+      <ConflictReviewDialog
+        open={showConflict}
+        conflicts={conflicts}
+        newCount={conflictNewCount}
+        loading={loading}
+        onCancel={() => setShowConflict(false)}
+        onConfirm={handleConfirmConflicts}
+      />
     </div>
   )
 }
@@ -730,10 +770,39 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
     navigate('/scraper/' + jobId)
   }
 
+  const [conflicts, setConflicts] = useState<ImportConflict[]>([])
+  const [conflictNewCount, setConflictNewCount] = useState(0)
+  const [showConflict, setShowConflict] = useState(false)
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null)
+  const [importingJob, setImportingJob] = useState(false)
+
   const handleImport = async (jobId: string) => {
     const res = await importScraperJob(jobId)
+    if (res.data?.needs_review) {
+      setConflicts(res.data.conflicts || [])
+      setConflictNewCount(res.data.new_count || 0)
+      setPendingJobId(jobId)
+      setShowConflict(true)
+      return
+    }
     alert(`✅ 匯入完成：新增 ${res.data.created} 筆，跳過重複 ${res.data.skipped} 筆`)
     onImported()
+  }
+
+  const handleConfirmConflicts = async (actions: Record<string, 'approve' | 'skip'>) => {
+    if (!pendingJobId) return
+    setImportingJob(true)
+    try {
+      const res = await importScraperJob(pendingJobId, undefined, undefined, undefined, { confirmed: true, conflict_actions: actions })
+      setShowConflict(false)
+      const pending = res.data.pending_approval || 0
+      alert(`✅ 匯入完成：新增 ${res.data.created} 筆，跳過 ${res.data.skipped} 筆${pending ? `，送審核 ${pending} 筆` : ''}`)
+      onImported()
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '匯入失敗')
+    } finally {
+      setImportingJob(false)
+    }
   }
 
   const statusColor: Record<string, string> = {
@@ -932,7 +1001,14 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
         )}
       </div>
 
-
+      <ConflictReviewDialog
+        open={showConflict}
+        conflicts={conflicts}
+        newCount={conflictNewCount}
+        loading={importingJob}
+        onCancel={() => setShowConflict(false)}
+        onConfirm={handleConfirmConflicts}
+      />
     </div>
   )
 }
