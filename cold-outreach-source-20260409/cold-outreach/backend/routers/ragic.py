@@ -200,9 +200,11 @@ def _norm_company(name: str) -> str:
     return n
 
 
-def _val(row: dict, key: str) -> Optional[str]:
+def _val(row: dict, key: str, maxlen: int = None) -> Optional[str]:
     v = (row.get(key) or "").strip()
-    return v or None
+    if not v:
+        return None
+    return v[:maxlen] if maxlen else v
 
 
 @router.post("/sync-to-leads")
@@ -250,11 +252,11 @@ async def sync_to_leads(
         if st:
             notes_parts.append(f"狀態：{st}")
         return Lead(
-            company_name=company,
-            contact_name=_val(row, "聯絡人"),
-            email=_val(row, "Email"),
-            phone=_val(row, "電話"),
-            website=_val(row, "官網"),
+            company_name=company[:255],
+            contact_name=_val(row, "聯絡人", 255),
+            email=_val(row, "Email", 255),
+            phone=_val(row, "電話", 50),
+            website=_val(row, "官網", 500),
             source=source,
             notes="；".join(notes_parts) or None,
         )
