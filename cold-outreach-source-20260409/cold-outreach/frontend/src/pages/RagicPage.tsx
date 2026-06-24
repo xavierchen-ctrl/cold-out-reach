@@ -3,6 +3,7 @@ import {
   ragicGetExistingClients,
   ragicGetNewClients,
   ragicUpsertNewClient,
+  ragicSyncToLeads,
   RagicRow,
 } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
@@ -10,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Search, Plus, ExternalLink, RefreshCw, Building2, UserRound } from 'lucide-react'
+import { Search, Plus, ExternalLink, RefreshCw, Building2, UserRound, DownloadCloud, Loader2 } from 'lucide-react'
 
 type TableKind = 'existing' | 'new'
 
@@ -32,6 +33,22 @@ const EMPTY_NEW = {
 export default function RagicPage() {
   const { user } = useAuth()
   const [tab, setTab] = useState<TableKind>('existing')
+
+  // 同步 Ragic → 系統名單
+  const [syncing, setSyncing] = useState(false)
+  const handleSyncToLeads = async () => {
+    if (!confirm('要把 Ragic 既有客戶 + 陌開表的客戶同步成系統名單嗎？\n（系統已存在的公司會自動跳過）')) return
+    setSyncing(true)
+    try {
+      const res = await ragicSyncToLeads()
+      const d = res.data
+      alert(`✅ 同步完成！\n新增既有客戶 ${d.created_existing} 筆、陌開 ${d.created_new} 筆（共 ${d.created_total} 筆）\n跳過（已存在/重複/無公司名）${d.skipped} 筆`)
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '同步失敗，請稍後再試')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   // 共用查詢狀態
   const [query, setQuery] = useState({
@@ -118,9 +135,19 @@ export default function RagicPage() {
           <h1 className="text-2xl font-bold">Ragic 中台查詢</h1>
           <p className="text-sm text-muted-foreground mt-1">查詢既有客戶 / 陌生開發名單，或新增資料至陌開表</p>
         </div>
-        <Button onClick={openAdd}>
-          <Plus className="w-4 h-4 mr-1" /> 新增到陌開表
-        </Button>
+        <div className="flex gap-2">
+          {user?.role === 'admin' && (
+            <Button variant="outline" onClick={handleSyncToLeads} disabled={syncing}
+              title="把 Ragic 既有客戶 + 陌開表客戶同步成系統名單（自動去重）">
+              {syncing
+                ? <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> 同步中...</>
+                : <><DownloadCloud className="w-4 h-4 mr-1" /> 同步客戶到名單</>}
+            </Button>
+          )}
+          <Button onClick={openAdd}>
+            <Plus className="w-4 h-4 mr-1" /> 新增到陌開表
+          </Button>
+        </div>
       </div>
 
       {/* Tabs */}

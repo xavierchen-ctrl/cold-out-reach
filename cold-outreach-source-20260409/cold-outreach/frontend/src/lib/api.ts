@@ -113,6 +113,17 @@ export const ragicBulkCheck = (company_names: string[]) =>
 
 export const ragicHealth = () => api.get<{ ok: boolean; token_set: boolean; detail?: string }>('/ragic/health')
 
+// 把 Ragic 既有客戶 + 陌開表同步成系統名單（去重、標記來源；僅 admin）
+export const ragicSyncToLeads = () => api.post<{
+  ok: boolean
+  created_existing: number
+  created_new: number
+  created_total: number
+  skipped: number
+  ragic_existing_rows: number
+  ragic_new_rows: number
+}>('/ragic/sync-to-leads')
+
 // ── Activities ────────────────────────────────────────────────────────────────
 export const getActivities = (leadId: string) =>
   api.get(`/leads/${leadId}/activities`)

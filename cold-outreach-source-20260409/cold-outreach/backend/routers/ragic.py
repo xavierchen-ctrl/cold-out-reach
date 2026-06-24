@@ -7,14 +7,17 @@ Ragic 中台 API 代理
 """
 import logging
 import os
+import re
 from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from auth import get_current_user
-from models import User
+from database import get_db
+from models import User, Lead, UserRole
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +25,7 @@ router = APIRouter(prefix="/api/ragic", tags=["ragic"])
 
 _BASE = "https://ragic.middleplatform.punwave.com/api/v1"
 _TOKEN = os.getenv("RAGIC_TOKEN", "ej031l4hk4g4")
-_TIMEOUT = 20.0
+_TIMEOUT = 60.0
 
 
 def _headers() -> dict:
@@ -178,6 +181,109 @@ async def bulk_check_companies(
 
     results = await asyncio.gather(*[_wrapped(n) for n in body.company_names])
     return {"results": results}
+
+
+# ── 公司名正規化（與名單防呆一致，用於去重）──────────────────────────────────
+_SUFFIXES = [
+    "股份有限公司", "有限公司", "股份公司", "企業社", "工作室", "公司",
+    "co.,ltd.", "co., ltd.", "co.ltd", "co ltd", "ltd.", "ltd", "inc.", "inc",
+    "corporation", "corp.", "corp", "company", "co.", "group", "集團",
+]
+
+
+def _norm_company(name: str) -> str:
+    n = (name or "").strip().lower()
+    for s in _SUFFIXES:
+        n = n.replace(s, "")
+    n = re.sub(r"台灣|臺灣|分公司|总公司|總公司", "", n)
+    n = re.sub(r"[\s\-_、,.()（）&·.]", "", n)
+    return n
+
+
+def _val(row: dict, key: str) -> Optional[str]:
+    v = (row.get(key) or "").strip()
+    return v or None
+
+
+@router.post("/sync-to-leads")
+async def sync_to_leads(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """把 Ragic 既有客戶表 + 陌開表的客戶同步成系統名單。
+    依公司名去重（系統已存在或本次重複的會跳過）；既有客戶優先於陌開表。
+    """
+    if current_user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="僅管理員可執行 Ragic 同步")
+
+    existing = await _post("get_existing_client_table", {})
+    new = await _post("get_new_client_table", {})
+    existing_rows = existing.get("data", []) or []
+    new_rows = new.get("data", []) or []
+
+    # 系統現有公司（正規化）→ 用於去重
+    seen = set()
+    for (cn,) in db.query(Lead.company_name).all():
+        seen.add(_norm_company(cn or ""))
+
+    created_existing = 0
+    created_new = 0
+    skipped = 0
+    to_add: List[Lead] = []
+
+    def _build(row: dict, source: str):
+        nonlocal skipped
+        company = _val(row, "公司")
+        if not company:
+            skipped += 1
+            return None
+        n = _norm_company(company)
+        if not n or n in seen:
+            skipped += 1
+            return None
+        seen.add(n)
+        am = _val(row, "接洽人")
+        st = _val(row, "狀態")
+        notes_parts = []
+        if am:
+            notes_parts.append(f"Ragic 接洽人：{am}")
+        if st:
+            notes_parts.append(f"狀態：{st}")
+        return Lead(
+            company_name=company,
+            contact_name=_val(row, "聯絡人"),
+            email=_val(row, "Email"),
+            phone=_val(row, "電話"),
+            website=_val(row, "官網"),
+            source=source,
+            notes="；".join(notes_parts) or None,
+        )
+
+    # 既有客戶優先
+    for row in existing_rows:
+        lead = _build(row, "ragic_既有客戶")
+        if lead:
+            to_add.append(lead)
+            created_existing += 1
+    for row in new_rows:
+        lead = _build(row, "ragic_陌開")
+        if lead:
+            to_add.append(lead)
+            created_new += 1
+
+    if to_add:
+        db.add_all(to_add)
+        db.commit()
+
+    return {
+        "ok": True,
+        "created_existing": created_existing,
+        "created_new": created_new,
+        "created_total": created_existing + created_new,
+        "skipped": skipped,
+        "ragic_existing_rows": len(existing_rows),
+        "ragic_new_rows": len(new_rows),
+    }
 
 
 @router.get("/health")
