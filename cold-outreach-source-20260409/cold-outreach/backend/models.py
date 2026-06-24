@@ -217,6 +217,20 @@ class EmailTemplate(Base):
     created_at = Column(DateTime, default=now_tw)
 
 
+class SentTemplateLog(Base):
+    """小郵差群發紀錄：同一家公司同一模板只發一次（防重複寄送）。"""
+    __tablename__ = "sent_template_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    company_norm = Column(String(255), nullable=False, index=True)   # 正規化後的公司名
+    company_name = Column(String(255), nullable=False)
+    template_id = Column(UUID(as_uuid=True), ForeignKey("email_templates.id", ondelete="SET NULL"), nullable=True)
+    template_name = Column(String(100), nullable=True)
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="SET NULL"), nullable=True)
+    sent_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    sent_at = Column(DateTime, default=now_tw)
+
+
 class ScheduledEmail(Base):
     __tablename__ = "scheduled_emails"
 

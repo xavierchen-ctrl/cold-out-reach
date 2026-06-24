@@ -2,20 +2,48 @@ import os
 import json
 import base64
 import re
+from typing import List, Optional
+from uuid import UUID
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email import encoders
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from google_auth_oauthlib.flow import Flow
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from database import get_db
-from models import User, Lead, LeadActivity, ActivityType, LeadStatus
+from models import User, Lead, LeadActivity, ActivityType, LeadStatus, SentTemplateLog, EmailTemplate
 from schemas import SendEmailRequest, BulkSendRequest
 from auth import get_current_user
+
+
+# ── 小郵差：公司名正規化（與名單防呆一致，去除型態字樣/空白標點） ──────────
+_COMPANY_SUFFIXES_MAILER = [
+    "股份有限公司", "有限公司", "股份公司", "企業社", "工作室", "公司",
+    "co.,ltd.", "co., ltd.", "co.ltd", "co ltd", "ltd.", "ltd", "inc.", "inc",
+    "corporation", "corp.", "corp", "company", "co.", "group", "集團",
+]
+
+
+def _norm_company(name: str) -> str:
+    n = (name or "").strip().lower()
+    for s in _COMPANY_SUFFIXES_MAILER:
+        n = n.replace(s, "")
+    n = re.sub(r"台灣|臺灣|分公司|总公司|總公司", "", n)
+    n = re.sub(r"[\s\-_、,.()（）&·.]", "", n)
+    return n
+
+
+class PostmanSendRequest(BaseModel):
+    lead_ids: List[UUID]
+    subject: str
+    body: str
+    template_id: Optional[UUID] = None
+    template_name: Optional[str] = None
 
 router = APIRouter(prefix="/api/gmail", tags=["gmail"])
 
@@ -257,6 +285,119 @@ def bulk_send_email(
             errors.append({"lead_id": str(lead_id), "error": str(e)})
 
     return {"sent": sent, "failed": failed, "errors": errors}
+
+
+@router.post("/postman-send")
+def postman_send(
+    body: PostmanSendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """小郵差群發：單次上限 50 封；同一家公司已寄過同一模板會自動跳過。"""
+    if not current_user.gmail_token:
+        raise HTTPException(status_code=400, detail="Gmail 尚未連結，請先到「設定 → 個人資料」綁定 Gmail。")
+    if len(body.lead_ids) > 50:
+        raise HTTPException(status_code=400, detail="單次群發上限 50 封")
+
+    token_data = json.loads(current_user.gmail_token)
+    creds = Credentials(
+        token=token_data["token"],
+        refresh_token=token_data.get("refresh_token"),
+        token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=token_data.get("client_id"),
+        client_secret=token_data.get("client_secret"),
+        scopes=token_data.get("scopes"),
+    )
+    service = build("gmail", "v1", credentials=creds)
+
+    import time
+    sent, skipped, failed, errors, skipped_list = 0, 0, 0, [], []
+    batch_sent_norms = set()   # 同一批次內同公司也只發一次
+
+    for lead_id in body.lead_ids:
+        lead = db.query(Lead).filter(Lead.id == lead_id).first()
+        if not lead or not lead.email:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": "無 Email"})
+            continue
+
+        cnorm = _norm_company(lead.company_name)
+
+        # 防重複：同公司同模板（DB 紀錄）或本批次已寄同公司
+        already = None
+        if body.template_id is not None:
+            already = db.query(SentTemplateLog).filter(
+                SentTemplateLog.company_norm == cnorm,
+                SentTemplateLog.template_id == body.template_id,
+            ).first()
+        if already or (cnorm in batch_sent_norms):
+            skipped += 1
+            skipped_list.append({
+                "lead_id": str(lead_id),
+                "company_name": lead.company_name,
+                "reason": f"「{lead.company_name}」已寄送過此模板",
+            })
+            continue
+
+        try:
+            subject = _replace_vars(body.subject, lead)
+            content = _replace_vars(body.body, lead)
+            msg = MIMEText(content, "plain", "utf-8")
+            msg["To"] = lead.email
+            msg["Subject"] = subject
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+            db.add(LeadActivity(
+                lead_id=lead.id,
+                type=ActivityType.email_sent,
+                content=f"[模板:{body.template_name or '自訂'}] To: {lead.email}\nSubject: {subject}\n\n{content}",
+                created_by=current_user.id,
+            ))
+            db.add(SentTemplateLog(
+                company_norm=cnorm,
+                company_name=lead.company_name,
+                template_id=body.template_id,
+                template_name=body.template_name,
+                lead_id=lead.id,
+                sent_by=current_user.id,
+            ))
+            db.commit()
+            batch_sent_norms.add(cnorm)
+            sent += 1
+            time.sleep(0.3)
+        except Exception as e:
+            failed += 1
+            errors.append({"lead_id": str(lead_id), "error": str(e)})
+
+    return {
+        "sent": sent, "skipped": skipped, "failed": failed,
+        "skipped_list": skipped_list, "errors": errors,
+    }
+
+
+@router.get("/sent-templates")
+def sent_templates(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """回傳 { company_norm: [{template_id, template_name}] }，供小郵差列表標記已發過的公司。"""
+    rows = db.query(
+        SentTemplateLog.company_norm,
+        SentTemplateLog.template_id,
+        SentTemplateLog.template_name,
+    ).all()
+    out: dict = {}
+    for r in rows:
+        key = r.company_norm
+        out.setdefault(key, [])
+        entry = {
+            "template_id": str(r.template_id) if r.template_id else None,
+            "template_name": r.template_name,
+        }
+        if entry not in out[key]:
+            out[key].append(entry)
+    return out
 
 
 @router.post("/check_replies")

@@ -666,11 +666,20 @@ const SCRAPER_SOURCE_ICONS: Record<string, string> = {
   custom_url: '🔗',
 }
 
+// 產業標籤選項（名單爬取）
+const SCRAPER_INDUSTRY_OPTIONS = [
+  '生活消費品', '交通', '服飾時尚', '金融', '建築製造', '政府單位', '政治',
+  '美妝', '食品', '娛樂/藝術', '旅遊', '科技', '教育', '零售業', '電子商務',
+  '電信', '醫療保健', '新聞傳播', '科學', '公益', '公關公司',
+]
+const INDUSTRY_OTHER = '其他'
+
 function ScraperTab({ onImported }: { onImported: () => void }) {
   const [source, setSource] = useState('taitra')
   const [url, setUrl] = useState(SCRAPER_DEFAULT_URLS['taitra'])
   const [keyword, setKeyword] = useState('')
   const [industry, setIndustry] = useState('')
+  const [industryOther, setIndustryOther] = useState('')
   const [limit, setLimit] = useState(10)
   const [icps, setIcps] = useState<ICPProfile[]>([])
   const [jobs, setJobs] = useState<ScraperJob[]>([])
@@ -696,11 +705,15 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
   const handleRun = async () => {
     setRunning(true)
     try {
+      const realIndustry =
+        industry === INDUSTRY_OTHER ? industryOther.trim()
+        : industry === 'all' ? ''
+        : industry
       const res = await runScraper(
         source,
         url !== SCRAPER_DEFAULT_URLS[source] ? url : undefined,
         keyword || undefined,
-        (industry === 'all' ? '' : industry) || undefined,
+        realIndustry || undefined,
         limit
       )
       // 爬蟲同步完成後，直接進入檢視頁面
@@ -818,23 +831,20 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部產業</SelectItem>
-                <SelectItem value="數位行銷">數位行銷</SelectItem>
-                <SelectItem value="廣告">廣告代理商</SelectItem>
-                <SelectItem value="電商">電商</SelectItem>
-                <SelectItem value="零售">零售</SelectItem>
-                <SelectItem value="品牌">品牌消費品</SelectItem>
-                <SelectItem value="科技">科技 / IT</SelectItem>
-                <SelectItem value="媒體">媒體 / 出版</SelectItem>
-                <SelectItem value="金融">金融 / 保險</SelectItem>
-                <SelectItem value="製造">製造業</SelectItem>
-                <SelectItem value="餐飲">餐飲 / 食品</SelectItem>
-                <SelectItem value="醫療">醫療 / 健康</SelectItem>
-                <SelectItem value="教育">教育</SelectItem>
-                <SelectItem value="房地產">房地產</SelectItem>
-                <SelectItem value="旅遊">旅遊 / 飯店</SelectItem>
-                <SelectItem value="物流">物流 / 供應鏈</SelectItem>
+                {SCRAPER_INDUSTRY_OPTIONS.map(o => (
+                  <SelectItem key={o} value={o}>{o}</SelectItem>
+                ))}
+                <SelectItem value={INDUSTRY_OTHER}>其他（請輸入附註）</SelectItem>
               </SelectContent>
             </Select>
+            {industry === INDUSTRY_OTHER && (
+              <Input
+                className="mt-2"
+                placeholder="請輸入產業標籤"
+                value={industryOther}
+                onChange={e => setIndustryOther(e.target.value)}
+              />
+            )}
           </div>
           <div>
             <Label>最多筆數</Label>
@@ -1022,15 +1032,6 @@ export default function LeadsPage() {
   const [allUsers, setAllUsers] = useState<User[]>([])
   const [allTags, setAllTags] = useState<Tag[]>([])
   const [showBulkTagModal, setShowBulkTagModal] = useState(false)
-
-  // Bulk email (Mail Merge)
-  const [showBulkEmail, setShowBulkEmail] = useState(false)
-  const [bulkEmailSubject, setBulkEmailSubject] = useState('')
-  const [bulkEmailBody, setBulkEmailBody] = useState('')
-  const [bulkEmailTemplates, setBulkEmailTemplates] = useState<EmailTemplate[]>([])
-  const [bulkSending, setBulkSending] = useState(false)
-  const [bulkResult, setBulkResult] = useState<{ sent: number; failed: number; errors: { lead_id: string; error: string }[] } | null>(null)
-  const [bulkPreviewLead, setBulkPreviewLead] = useState<Lead | null>(null)
 
   const [sortContact, setSortContact] = useState(false)  // 預設關閉：讓最新匯入的名單排在最上面，避免被擠到後面
 
@@ -1340,15 +1341,6 @@ export default function LeadsPage() {
                     </SelectContent>
                   </Select>
                 )}
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => {
-                  const res = await getTemplates()
-                  setBulkEmailTemplates(res.data || [])
-                  setBulkResult(null)
-                  setBulkPreviewLead(leads.find(l => [...checked].includes(l.id) && l.email) || null)
-                  setShowBulkEmail(true)
-                }}>
-                  <Mail className="w-3 h-3 mr-1" /> 群發信
-                </Button>
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleLushaEnrich} disabled={enriching}>
                   <RefreshCw className={`w-3 h-3 mr-1 ${enriching ? 'animate-spin' : ''}`} />
                   {enriching ? (enrichMsg || '補電話中...') : '📞 Lusha 補電話'}
@@ -1569,134 +1561,6 @@ export default function LeadsPage() {
         <CreateLeadModal onClose={() => setShowCreate(false)} onCreated={loadLeads} />
       )}
 
-      {/* Bulk Email (Mail Merge) Modal */}
-      <Dialog open={showBulkEmail} onOpenChange={v => { setShowBulkEmail(v); if (!v) setBulkResult(null) }}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Mail className="w-4 h-4" />
-              群發信（Mail Merge）— 已選 {checked.size} 位收件人
-            </DialogTitle>
-          </DialogHeader>
-
-          {bulkResult ? (
-            <div className="space-y-4 py-2">
-              <div className={`rounded-lg p-4 ${bulkResult.failed === 0 ? 'bg-green-50 border border-green-200' : 'bg-yellow-50 border border-yellow-200'}`}>
-                <p className="font-medium text-lg">
-                  {bulkResult.failed === 0 ? '✅' : '⚠️'} 發送完成
-                </p>
-                <p className="mt-1 text-sm">成功 <strong>{bulkResult.sent}</strong> 封，失敗 <strong>{bulkResult.failed}</strong> 封</p>
-              </div>
-              {bulkResult.errors.length > 0 && (
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-destructive">失敗明細：</p>
-                  {bulkResult.errors.map((e, i) => (
-                    <div key={i} className="text-xs bg-muted/50 rounded px-2 py-1 flex gap-2">
-                      <span className="text-muted-foreground truncate">{e.lead_id}</span>
-                      <span className="text-destructive">{e.error}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex justify-end">
-                <Button onClick={() => { setShowBulkEmail(false); setBulkResult(null) }}>關閉</Button>
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* 模板選擇 */}
-              {bulkEmailTemplates.length > 0 && (
-                <div>
-                  <Label>套用模板（選填）</Label>
-                  <Select onValueChange={templateId => {
-                    const t = bulkEmailTemplates.find(t => t.id === templateId)
-                    if (t) { setBulkEmailSubject(t.subject); setBulkEmailBody(t.body) }
-                  }}>
-                    <SelectTrigger className="mt-1"><SelectValue placeholder="選擇模板" /></SelectTrigger>
-                    <SelectContent>
-                      {bulkEmailTemplates.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* 變數提示 */}
-              <div className="text-xs text-muted-foreground bg-muted/40 rounded px-3 py-2">
-                <span className="font-medium">可用變數：</span>
-                {[
-                  '{{company_name}}', '{{contact_name}}', '{{industry}}', '{{city}}', '{{title}}'
-                ].map(v => (
-                  <code key={v} className="mx-1 bg-background border rounded px-1">{v}</code>
-                ))}
-              </div>
-
-              <div>
-                <Label>主旨</Label>
-                <Input className="mt-1" value={bulkEmailSubject} onChange={e => setBulkEmailSubject(e.target.value)} placeholder="[WAVENET] {{company_name}} 的專屬方案" />
-              </div>
-              <div>
-                <Label>內文</Label>
-                <Textarea className="mt-1" rows={8} value={bulkEmailBody} onChange={e => setBulkEmailBody(e.target.value)} placeholder={"親愛的 {{contact_name}} 您好，\n\n我是 WAVENET 業務團隊..."} />
-              </div>
-
-              {/* 預覽第一封 */}
-              {bulkPreviewLead && bulkEmailSubject && (
-                <div className="border rounded-lg p-3 bg-muted/30">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">📧 預覽（{bulkPreviewLead.company_name}）</p>
-                  <p className="text-sm font-medium">
-                    {bulkEmailSubject
-                      .replace('{{company_name}}', bulkPreviewLead.company_name || '')
-                      .replace('{{contact_name}}', bulkPreviewLead.contact_name || '您好')
-                      .replace('{{industry}}', bulkPreviewLead.industry || '')
-                      .replace('{{city}}', bulkPreviewLead.city || '')
-                      .replace('{{title}}', bulkPreviewLead.title || '')}
-                  </p>
-                  <pre className="text-xs mt-2 whitespace-pre-wrap text-muted-foreground max-h-28 overflow-y-auto">
-                    {bulkEmailBody
-                      .replace(/\{\{company_name\}\}/g, bulkPreviewLead.company_name || '')
-                      .replace(/\{\{contact_name\}\}/g, bulkPreviewLead.contact_name || '您好')
-                      .replace(/\{\{industry\}\}/g, bulkPreviewLead.industry || '')
-                      .replace(/\{\{city\}\}/g, bulkPreviewLead.city || '')
-                      .replace(/\{\{title\}\}/g, bulkPreviewLead.title || '')}
-                  </pre>
-                </div>
-              )}
-
-              <div className="flex justify-between items-center pt-1">
-                <p className="text-xs text-muted-foreground">
-                  每封信都會個別寄出，並存入 Gmail 已寄出匣
-                </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" onClick={() => setShowBulkEmail(false)}>取消</Button>
-                  <Button
-                    disabled={bulkSending || !bulkEmailSubject || !bulkEmailBody}
-                    onClick={async () => {
-                      setBulkSending(true)
-                      try {
-                        const res = await bulkSendEmail([...checked], bulkEmailSubject, bulkEmailBody)
-                        setBulkResult(res.data)
-                      } catch (e: unknown) {
-                        const err = e as { response?: { data?: { detail?: string } } }
-                        const msg = err?.response?.data?.detail || '發送失敗'
-                        if (msg.includes('Gmail not connected')) {
-                          const authRes = await getGmailAuthUrl()
-                          window.open(authRes.data.auth_url, '_blank')
-                        } else {
-                          alert(msg)
-                        }
-                      } finally {
-                        setBulkSending(false)
-                      }
-                    }}
-                  >
-                    {bulkSending ? `發送中…` : `開始群發（${checked.size} 封）`}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

@@ -103,6 +103,8 @@ const BUDGET_OPTIONS = [
   '10-30萬/月', '30-50萬/月', '50-100萬/月', '100萬以上/月',
 ]
 
+const GOAL_OPTIONS = ['曝光', '導流', '轉換']
+
 const STATUS_COLORS: Record<string, string> = {
   draft: 'bg-yellow-100 text-yellow-700',
   sent: 'bg-green-100 text-green-700',
@@ -281,6 +283,8 @@ function GenerateDialog({
     budget_range: '50-100萬/月',
     extra_context: '',
     year: new Date().getFullYear() + 1,
+    goals: [] as string[],
+    goal_detail: '',
   })
   const [contextFiles, setContextFiles] = useState<Array<{ file: File; preview?: string }>>([])
   const [search, setSearch] = useState('')
@@ -329,6 +333,8 @@ function GenerateDialog({
         budget_range: form.budget_range,
         extra_context: extraContext,
         year: form.year,
+        goals: form.goals,
+        goal_detail: form.goal_detail,
       })
       await navigator.clipboard.writeText(res.data.prompt)
       setPromptCopied(true)
@@ -407,6 +413,39 @@ function GenerateDialog({
             </div>
           </div>
 
+          {/* 簡報目標（可多選）+ 補充說明 */}
+          <div>
+            <Label>簡報目標（可多選）</Label>
+            <div className="flex flex-wrap gap-1.5 mt-1">
+              {GOAL_OPTIONS.map(o => (
+                <button
+                  key={o}
+                  type="button"
+                  onClick={() => setForm(f => ({
+                    ...f,
+                    goals: f.goals.includes(o)
+                      ? f.goals.filter(s => s !== o)
+                      : [...f.goals, o],
+                  }))}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    form.goals.includes(o)
+                      ? 'bg-primary text-primary-foreground border-primary'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {o}
+                </button>
+              ))}
+            </div>
+            <Textarea
+              className="mt-2 text-sm"
+              rows={2}
+              placeholder="補充說明本次簡報目標，例：主打雙11檔期導流官網、提升新品曝光與試用轉換...（會一併寫入提示詞）"
+              value={form.goal_detail}
+              onChange={e => setForm(f => ({ ...f, goal_detail: e.target.value }))}
+            />
+          </div>
+
           {/* 補充背景 */}
           <div>
             <Label>補充背景（選填）</Label>
@@ -470,22 +509,40 @@ function GenerateDialog({
 
           {/* 複製成功提示 */}
           {promptCopied && (
-            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-center justify-between">
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3">
               <div className="flex items-center gap-2">
                 <CheckCheck className="w-4 h-4 text-green-600 shrink-0" />
                 <div>
                   <p className="text-sm font-medium text-green-800">提示詞已複製到剪貼簿！</p>
-                  <p className="text-xs text-green-600 mt-0.5">開啟 ChatGPT → 貼上 → 送出，即可產生 PPTX</p>
+                  <p className="text-xs text-green-600 mt-0.5">開啟下方任一 AI 工具 → 貼上 → 送出，即可製作簡報</p>
                 </div>
               </div>
-              <a
-                href="https://chatgpt.com"
-                target="_blank"
-                rel="noreferrer"
-                className="ml-3 shrink-0 bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
-              >
-                開啟 ChatGPT →
-              </a>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <a
+                  href="https://chatgpt.com"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-green-600 hover:bg-green-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  開啟 ChatGPT →
+                </a>
+                <a
+                  href="https://gemini.google.com/app"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  開啟 Gemini →
+                </a>
+                <a
+                  href="https://www.genspark.ai"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  開啟 Genspark →
+                </a>
+              </div>
             </div>
           )}
 
@@ -497,7 +554,7 @@ function GenerateDialog({
                 ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />整理客戶資料中...</>
                 : promptCopied
                 ? <><CheckCheck className="w-4 h-4 mr-1.5" />已複製！再次複製</>
-                : <><Copy className="w-4 h-4 mr-1.5" />複製 ChatGPT 提示詞</>}
+                : <><Copy className="w-4 h-4 mr-1.5" />複製提示詞</>}
             </Button>
           </div>
         </div>

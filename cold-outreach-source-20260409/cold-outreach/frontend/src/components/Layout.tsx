@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { useAuth } from '@/hooks/useAuth'
 import { Button } from '@/components/ui/button'
-import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X, Presentation, Database } from 'lucide-react'
+import { LayoutDashboard, Users, LogOut, Mail, FileText, TrendingUp, Settings, FlaskConical, BarChart3, FileBarChart2, CalendarCheck, Target, BarChart2, Crosshair, Menu, X, Presentation, Database, Send } from 'lucide-react'
 
 export default function Layout() {
   const { user, signOut } = useAuth()
@@ -22,16 +22,20 @@ export default function Layout() {
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {[
           { to: '/leads', icon: <Users className="w-4 h-4" />, label: '名單管理' },
-          { to: '/sequences', icon: <Mail className="w-4 h-4" />, label: '發信序列' },
+          { to: '/postman', icon: <Send className="w-4 h-4" />, label: '小郵差' },
+          // 以下功能僅 admin 可見
+          ...(user?.role === 'admin' ? [{ to: '/sequences', icon: <Mail className="w-4 h-4" />, label: '發信序列' }] : []),
           { to: '/templates', icon: <FileText className="w-4 h-4" />, label: '信件模板' },
-          { to: '/today', icon: <CalendarCheck className="w-4 h-4" />, label: '今日待辦' },
-          { to: '/cadences', icon: <Target className="w-4 h-4" />, label: 'Cadence 波段' },
-          { to: '/icp', icon: <Crosshair className="w-4 h-4" />, label: 'ICP 設定' },
-          { to: '/performance', icon: <TrendingUp className="w-4 h-4" />, label: '績效報告' },
-          ...(user?.role === 'admin' ? [{ to: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '業績 Dashboard' }] : []),
-          { to: '/analytics', icon: <BarChart3 className="w-4 h-4" />, label: '智能分析' },
-          { to: '/reports', icon: <FileBarChart2 className="w-4 h-4" />, label: 'AI 週報' },
-          { to: '/proposal', icon: <Presentation className="w-4 h-4" />, label: '提案生成' },
+          ...(user?.role === 'admin' ? [
+            { to: '/today', icon: <CalendarCheck className="w-4 h-4" />, label: '今日待辦' },
+            { to: '/cadences', icon: <Target className="w-4 h-4" />, label: 'Cadence 波段' },
+            { to: '/icp', icon: <Crosshair className="w-4 h-4" />, label: 'ICP 設定' },
+            { to: '/performance', icon: <TrendingUp className="w-4 h-4" />, label: '績效報告' },
+            { to: '/dashboard', icon: <LayoutDashboard className="w-4 h-4" />, label: '業績 Dashboard' },
+            { to: '/analytics', icon: <BarChart3 className="w-4 h-4" />, label: '智能分析' },
+            { to: '/reports', icon: <FileBarChart2 className="w-4 h-4" />, label: 'AI 週報' },
+          ] : []),
+          { to: '/proposals', icon: <Presentation className="w-4 h-4" />, label: '提案生成' },
           { to: '/ragic', icon: <Database className="w-4 h-4" />, label: 'Ragic 中台' },
           { to: '/settings', icon: <Settings className="w-4 h-4" />, label: '設定' },
         ].map(item => (

@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 from typing import Optional, List
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
@@ -17,6 +18,67 @@ def _check_access(lead: Lead, user: User, db: Session):
     visible_ids = get_visible_user_ids(user, db)
     if visible_ids is not None and lead.assigned_to not in visible_ids:
         raise HTTPException(status_code=403, detail="Access denied")
+
+
+# ── 名單防呆：公司名正規化 / 網域萃取，用於偵測重複或相似名單 ──────────────
+_COMPANY_SUFFIXES = [
+    "股份有限公司", "有限公司", "股份公司", "企業社", "工作室", "公司",
+    "co.,ltd.", "co., ltd.", "co.ltd", "co ltd", "ltd.", "ltd", "inc.", "inc",
+    "corporation", "corp.", "corp", "company", "co.", "group", "集團",
+]
+
+
+def _normalize_company(name: str) -> str:
+    """去除公司型態字樣、空白與標點，用於『相似公司名』比對。"""
+    n = (name or "").strip().lower()
+    for suffix in _COMPANY_SUFFIXES:
+        n = n.replace(suffix, "")
+    # 去除台灣/分公司等地區字樣常見干擾
+    n = re.sub(r"台灣|臺灣|分公司|总公司|總公司", "", n)
+    n = re.sub(r"[\s\-_、,.()（）&·.]", "", n)
+    return n
+
+
+def _domain(url: str) -> str:
+    """從官網 URL 萃取主網域（去 scheme/www/path）。"""
+    if not url:
+        return ""
+    u = url.strip().lower()
+    u = re.sub(r"^https?://", "", u)
+    u = re.sub(r"^www\.", "", u)
+    u = u.split("/")[0].split("?")[0].strip()
+    return u
+
+
+def _find_lead_conflict(body, db: Session):
+    """偵測新名單是否與既有名單衝突（需人工審核）。
+    回傳 (conflict_lead_id, reason) 或 (None, "")。
+    觸發條件：同統一編號 / 官網網域一致 / 公司名稱相似（含同公司不同部門、不同品牌）。
+    完全同公司同部門（視為單純重複）不在此攔截，維持原本可直接建立的行為。
+    """
+    new_norm = _normalize_company(body.company_name)
+    new_tax = (getattr(body, "tax_id", "") or "").strip()
+    new_domain = _domain(getattr(body, "website", "") or "")
+    new_dept = (getattr(body, "department", "") or "").strip().lower()
+
+    rows = db.query(
+        Lead.id, Lead.company_name, Lead.department, Lead.tax_id, Lead.website
+    ).all()
+
+    for r in rows:
+        # 1) 同一統一編號
+        if new_tax and (r.tax_id or "").strip() and (r.tax_id or "").strip() == new_tax:
+            return r.id, f"統一編號相同（{new_tax}）"
+        # 2) 官網網域一致
+        if new_domain and _domain(r.website or "") == new_domain:
+            return r.id, f"官網網域相同（{new_domain}）"
+        # 3) 公司名稱相似（同公司不同部門 / 不同品牌）
+        if new_norm and _normalize_company(r.company_name) == new_norm:
+            r_dept = (r.department or "").strip().lower()
+            if r_dept == new_dept:
+                continue  # 同公司同部門＝單純重複，維持原行為不攔
+            return r.id, f"公司名稱相似（{r.company_name}），同公司不同部門 / 品牌"
+    return None, ""
 
 
 @router.get("", response_model=List[LeadOut])
@@ -80,35 +142,29 @@ def create_lead(
     if current_user.role == UserRole.sales:
         body.assigned_to = current_user.id
 
-    # ── 同公司不同部門偵測 ──────────────────────────────────────────
-    existing = db.query(Lead).filter(Lead.company_name.ilike(body.company_name)).all()
-    if existing:
-        new_dept = (body.department or "").strip().lower()
-        same_dept_found = any((l.department or "").strip().lower() == new_dept for l in existing)
-        if not same_dept_found:
-            approval = PendingLeadApproval(
-                submitted_by=current_user.id,
-                lead_data=body.model_dump(mode="json"),
-                conflict_company=body.company_name,
-                conflict_lead_id=existing[0].id,
-            )
-            db.add(approval)
-            db.commit()
-            db.refresh(approval)
-            existing_dept_display = existing[0].department or "（未填）"
-            new_dept_display = body.department or "（未填）"
-            return JSONResponse(
-                status_code=202,
-                content={
-                    "pending_approval": True,
-                    "approval_id": str(approval.id),
-                    "message": (
-                        f"「{body.company_name}」已有名單（部門：{existing_dept_display}），"
-                        f"新增部門「{new_dept_display}」需送請小組長及 Ivy 審核，"
-                        "核准後才會正式建立。"
-                    ),
-                },
-            )
+    # ── 名單防呆：相似公司名 / 同統編 / 同官網網域 / 同公司不同部門或品牌 → 送審 ──
+    conflict_id, conflict_reason = _find_lead_conflict(body, db)
+    if conflict_id:
+        approval = PendingLeadApproval(
+            submitted_by=current_user.id,
+            lead_data=body.model_dump(mode="json"),
+            conflict_company=body.company_name,
+            conflict_lead_id=conflict_id,
+        )
+        db.add(approval)
+        db.commit()
+        db.refresh(approval)
+        return JSONResponse(
+            status_code=202,
+            content={
+                "pending_approval": True,
+                "approval_id": str(approval.id),
+                "message": (
+                    f"偵測到可能重複的名單（原因：{conflict_reason}）。"
+                    f"「{body.company_name}」需送請小組長及主管審核，核准後才會正式建立。"
+                ),
+            },
+        )
     # ── 無衝突，直接建立 ──────────────────────────────────────────
     lead = Lead(**body.model_dump())
     db.add(lead)

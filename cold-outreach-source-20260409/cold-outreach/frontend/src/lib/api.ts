@@ -130,6 +130,18 @@ export const sendEmail = (data: Record<string, unknown>) => api.post('/gmail/sen
 export const bulkSendEmail = (lead_ids: string[], subject: string, body: string) =>
   api.post('/gmail/bulk-send', { lead_ids, subject, body })
 
+// 小郵差群發（單次上限 50、同公司同模板自動跳過）
+export const postmanSend = (data: {
+  lead_ids: string[]
+  subject: string
+  body: string
+  template_id?: string | null
+  template_name?: string | null
+}) => api.post('/gmail/postman-send', data)
+
+// 已寄送模板對照表：{ company_norm: [{template_id, template_name}] }
+export const getSentTemplates = () => api.get('/gmail/sent-templates')
+
 // ── AI ────────────────────────────────────────────────────────────────────────
 export const generateDraft = (lead_id: string, template_type: string, customer_background?: string) =>
   api.post('/ai/draft', { lead_id, template_type, customer_background })
@@ -431,6 +443,8 @@ export const generateChatGptPrompt = (data: {
   budget_range: string
   extra_context?: string
   year?: number
+  goals?: string[]
+  goal_detail?: string
 }) => api.post('/proposal/chatgpt-prompt', data)
 
 export const generateProposalAI = (data: {

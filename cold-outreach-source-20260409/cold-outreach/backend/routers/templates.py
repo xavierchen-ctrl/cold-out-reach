@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from auth import get_current_user
@@ -131,10 +132,16 @@ def seed_default_templates(db: Session):
 @router.get("", response_model=List[TemplateOut])
 def list_templates(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     seed_default_templates(db)
-    return db.query(EmailTemplate).order_by(EmailTemplate.created_at).all()
+    # 每位 user 只看得到「自己建立的」+「系統預設（created_by 為空，共用）」
+    return (
+        db.query(EmailTemplate)
+        .filter(or_(EmailTemplate.created_by == current_user.id, EmailTemplate.created_by.is_(None)))
+        .order_by(EmailTemplate.created_at)
+        .all()
+    )
 
 
 @router.post("", response_model=TemplateOut)
@@ -155,11 +162,13 @@ def update_template(
     template_id: UUID,
     body: TemplateUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     tmpl = db.query(EmailTemplate).filter(EmailTemplate.id == template_id).first()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="只能編輯自己建立的模板（系統預設模板不可編輯）")
     for k, v in body.model_dump(exclude_none=True).items():
         setattr(tmpl, k, v)
     db.commit()
@@ -171,11 +180,13 @@ def update_template(
 def delete_template(
     template_id: UUID,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     tmpl = db.query(EmailTemplate).filter(EmailTemplate.id == template_id).first()
     if not tmpl:
         raise HTTPException(status_code=404, detail="Template not found")
+    if tmpl.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="只能刪除自己建立的模板（系統預設模板不可刪除）")
     db.delete(tmpl)
     db.commit()
     return {"ok": True}

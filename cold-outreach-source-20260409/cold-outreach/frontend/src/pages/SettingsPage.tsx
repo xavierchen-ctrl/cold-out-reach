@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail, getThreadsCookieStatus, saveThreadsCookie, deleteThreadsCookie } from '@/lib/api'
+import { getTags, createTag, deleteTag, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail } from '@/lib/api'
 import { Tag, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -688,101 +688,6 @@ function GmailBindingCard() {
   )
 }
 
-// ── Threads Cookie Card ───────────────────────────────────────────────────────
-function ThreadsCookieCard() {
-  const [connected, setConnected] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [inputVal, setInputVal] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [show, setShow] = useState(false)
-
-  useEffect(() => {
-    getThreadsCookieStatus()
-      .then(r => setConnected(r.data.connected))
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [])
-
-  const handleSave = async () => {
-    if (!inputVal.trim()) return
-    setSaving(true)
-    try {
-      await saveThreadsCookie(inputVal.trim())
-      setConnected(true)
-      setInputVal('')
-      alert('✅ Threads Cookie 已儲存，下次爬蟲將以登入狀態執行')
-    } catch {
-      alert('儲存失敗')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleClear = async () => {
-    if (!confirm('確定要清除 Threads Cookie 嗎？')) return
-    await deleteThreadsCookie()
-    setConnected(false)
-  }
-
-  return (
-    <div className="bg-white border rounded-lg p-5 max-w-md">
-      <div className="flex items-center gap-2 mb-3">
-        <span className="text-base">🧵</span>
-        <h3 className="text-sm font-medium text-gray-700">Threads 登入 Cookie</h3>
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-muted-foreground">載入中...</p>
-      ) : connected ? (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 px-3 py-2 rounded-lg">
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span className="font-medium">Cookie 已設定，爬蟲將以登入狀態執行</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={handleClear}
-            className="text-red-500 hover:text-red-600 hover:bg-red-50 border-red-200">
-            清除 Cookie
-          </Button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2 text-sm text-gray-500 bg-gray-50 px-3 py-2 rounded-lg">
-            <XCircle className="w-4 h-4 shrink-0" />
-            <span>尚未設定，爬蟲可能因登入牆取得 0 筆資料</span>
-          </div>
-          <div className="text-xs text-muted-foreground space-y-1 bg-blue-50 border border-blue-100 rounded p-3">
-            <p className="font-medium text-blue-700">如何取得 sessionid：</p>
-            <ol className="list-decimal list-inside space-y-0.5 text-blue-600">
-              <li>用 Chrome 登入 threads.net</li>
-              <li>按 F12 → Application → Cookies → threads.net</li>
-              <li>找到 <code className="bg-blue-100 px-1 rounded">sessionid</code> → 複製 Value</li>
-              <li>貼到下方欄位並儲存</li>
-            </ol>
-          </div>
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Input
-                type={show ? 'text' : 'password'}
-                value={inputVal}
-                onChange={e => setInputVal(e.target.value)}
-                placeholder="貼上 sessionid 的值"
-                className="pr-9 text-xs"
-              />
-              <button type="button" onClick={() => setShow(v => !v)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground">
-                {show ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              </button>
-            </div>
-            <Button size="sm" onClick={handleSave} disabled={saving || !inputVal.trim()}>
-              {saving ? '儲存中...' : '儲存'}
-            </Button>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Profile Tab ───────────────────────────────────────────────────────────────
 function ProfileTab() {
   const [currentPw, setCurrentPw] = useState('')
@@ -829,7 +734,6 @@ function ProfileTab() {
         <h2 className="text-lg font-semibold mb-4">個人資料</h2>
         <div className="space-y-4">
           <GmailBindingCard />
-          <ThreadsCookieCard />
         </div>
       </div>
       <div>

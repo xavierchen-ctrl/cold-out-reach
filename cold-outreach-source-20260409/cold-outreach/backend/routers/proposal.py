@@ -96,6 +96,8 @@ class GenerateFromLeadRequest(BaseModel):
     budget_range: str = "50-100萬/月"
     extra_context: str = ""
     year: int = 2026
+    goals: List[str] = []          # 簡報目標：曝光 / 導流 / 轉換（可複選）
+    goal_detail: str = ""          # 簡報目標補充說明
 
 
 _BUDGET_MAP = {
@@ -280,6 +282,17 @@ async def get_chatgpt_prompt(
 
     services_str = "、".join(body.services)
 
+    # 本次簡報目標（曝光 / 導流 / 轉換 + 補充說明）
+    goals_str = "、".join(body.goals) if body.goals else ""
+    goal_block = ""
+    if goals_str or body.goal_detail.strip():
+        goal_block = "\n【本次簡報目標】\n"
+        if goals_str:
+            goal_block += f"主要目標：{goals_str}\n"
+        if body.goal_detail.strip():
+            goal_block += f"目標說明：{body.goal_detail.strip()}\n"
+        goal_block += "請讓整份提案的策略、KPI、媒體配置與成效指標都明確對齊以上目標。\n"
+
     budget_int = int(monthly_budget)
     if budget_int <= 30:
         budget_guidance = """【預算策略指引 — 小預算（30萬以下）】
@@ -319,7 +332,7 @@ async def get_chatgpt_prompt(
 主推服務：{services_str}
 品牌現況：
 {current_situation}
-
+{goal_block}
 {budget_guidance}
 
 【建議涵蓋的內容方向（依客戶情況取捨）】

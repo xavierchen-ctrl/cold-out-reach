@@ -1,3 +1,14 @@
+# ── Stage 1: build frontend (latest UI) ───────────────────────────────────────
+FROM node:20-slim AS frontend
+WORKDIR /fe
+COPY frontend/package*.json ./
+RUN npm ci
+COPY frontend/ ./
+# Cloud Run serves frontend + API at the same origin → use relative /api.
+# Drop .env.production so VITE_API_URL is unset (otherwise it bakes in an absolute URL).
+RUN rm -f .env.production .env.local && npm run build
+
+# ── Stage 2: backend + bundled frontend ───────────────────────────────────────
 FROM python:3.11-slim
 WORKDIR /app
 
@@ -16,6 +27,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN playwright install chromium
 
 COPY backend/ ./
+
+# Replace any stale bundled frontend with the freshly built one
+COPY --from=frontend /fe/dist ./static
 
 EXPOSE 8080
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

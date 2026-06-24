@@ -19,6 +19,7 @@ import ICPPage from '@/pages/ICPPage'
 import ScraperJobPage from '@/pages/ScraperJobPage'
 import ProposalsPage from '@/pages/ProposalsPage'
 import ProposalPage from '@/pages/ProposalPage'
+import PostmanPage from '@/pages/PostmanPage'
 import RagicPage from '@/pages/RagicPage'
 import Layout from '@/components/Layout'
 
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="scraper/:id" element={<ErrorBoundary><ScraperJobPage /></ErrorBoundary>} />
           <Route path="proposals" element={<ErrorBoundary><ProposalsPage /></ErrorBoundary>} />
           <Route path="proposal" element={<ErrorBoundary><ProposalPage /></ErrorBoundary>} />
+          <Route path="postman" element={<ErrorBoundary><PostmanPage /></ErrorBoundary>} />
           <Route path="ragic" element={<ErrorBoundary><RagicPage /></ErrorBoundary>} />
         </Route>
         <Route path="*" element={<Navigate to="/leads" replace />} />
