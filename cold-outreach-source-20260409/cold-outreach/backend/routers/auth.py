@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, UserRole
 from schemas import LoginRequest, UserOut
-from auth import verify_password, hash_password, validate_password, create_access_token, get_current_user, is_allowed_email, require_admin
+from auth import verify_password, hash_password, validate_password, create_access_token, get_current_user, is_allowed_email, require_admin_or_manager
 
 # HTTPS 環境（Railway/Vercel）啟用 secure cookie
 _COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
@@ -78,7 +78,7 @@ def me(current_user: User = Depends(get_current_user)):
 @router.get("/users", response_model=List[UserOut])
 def list_users(
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_or_manager),
 ):
     return db.query(User).order_by(User.name).all()
 
@@ -102,7 +102,7 @@ class UpdateUserBody(BaseModel):
 def create_user(
     body: CreateUserBody,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_or_manager),
 ):
     existing = db.query(User).filter(User.email == body.email.lower()).first()
     if existing:
@@ -128,7 +128,7 @@ def update_user(
     user_id: str,
     body: UpdateUserBody,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_or_manager),
 ):
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
@@ -159,7 +159,7 @@ def update_user(
 def get_manager_scope(
     user_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_admin_or_manager),
 ):
     from models import ManagerScope
     rows = db.query(ManagerScope).filter(ManagerScope.manager_id == user_id).all()
@@ -224,7 +224,7 @@ def delete_threads_cookie(
 def delete_user(
     user_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_admin_or_manager),
 ):
     if str(current_user.id) == user_id:
         raise HTTPException(status_code=400, detail="Cannot delete yourself")

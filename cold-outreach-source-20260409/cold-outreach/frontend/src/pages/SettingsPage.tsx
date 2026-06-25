@@ -52,7 +52,7 @@ export default function SettingsPage() {
   const tabs = [
     { key: 'tags', label: '標籤管理', icon: TagIcon },
     { key: 'profile', label: '個人資料', icon: User },
-    ...(user?.role === 'admin' ? [
+    ...((user?.role === 'admin' || user?.role === 'manager') ? [
       { key: 'users', label: '帳號管理', icon: Users },
       { key: 'teams', label: '部門管理', icon: Users },
     ] : []),
@@ -76,8 +76,8 @@ export default function SettingsPage() {
       </div>
       {tab === 'tags' && <TagsTab />}
       {tab === 'profile' && <ProfileTab />}
-      {tab === 'users' && user?.role === 'admin' && <UsersTab currentUserId={user.id} />}
-      {tab === 'teams' && user?.role === 'admin' && <TeamsTab />}
+      {tab === 'users' && (user?.role === 'admin' || user?.role === 'manager') && <UsersTab currentUserId={user.id} />}
+      {tab === 'teams' && (user?.role === 'admin' || user?.role === 'manager') && <TeamsTab />}
     </div>
   )
 }

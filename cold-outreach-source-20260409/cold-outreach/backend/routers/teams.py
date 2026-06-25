@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Team, User
 from schemas import TeamOut, TeamCreate, UserOut
-from auth import get_current_user, require_admin
+from auth import get_current_user, require_admin_or_manager
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -16,7 +16,7 @@ def list_teams(db: Session = Depends(get_db), _: User = Depends(get_current_user
 
 
 @router.post("", response_model=TeamOut)
-def create_team(body: TeamCreate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def create_team(body: TeamCreate, db: Session = Depends(get_db), _: User = Depends(require_admin_or_manager)):
     if db.query(Team).filter(Team.name == body.name).first():
         raise HTTPException(status_code=400, detail="Team name already exists")
     team = Team(name=body.name)
@@ -27,7 +27,7 @@ def create_team(body: TeamCreate, db: Session = Depends(get_db), _: User = Depen
 
 
 @router.put("/{team_id}", response_model=TeamOut)
-def update_team(team_id: UUID, body: TeamCreate, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def update_team(team_id: UUID, body: TeamCreate, db: Session = Depends(get_db), _: User = Depends(require_admin_or_manager)):
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
@@ -38,7 +38,7 @@ def update_team(team_id: UUID, body: TeamCreate, db: Session = Depends(get_db), 
 
 
 @router.delete("/{team_id}")
-def delete_team(team_id: UUID, db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def delete_team(team_id: UUID, db: Session = Depends(get_db), _: User = Depends(require_admin_or_manager)):
     team = db.query(Team).filter(Team.id == team_id).first()
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
