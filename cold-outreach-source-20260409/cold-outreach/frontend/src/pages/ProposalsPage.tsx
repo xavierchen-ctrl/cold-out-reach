@@ -1035,17 +1035,6 @@ export default function ProposalsPage() {
         </div>
       </div>
 
-      <TemplateManager />
-
-      <div className="mb-4">
-        <Input
-          placeholder="搜尋公司名稱、提案標題或服務類型..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="max-w-sm"
-        />
-      </div>
-
       {loading ? (
         <div className="flex items-center gap-2 text-sm text-muted-foreground py-8">
           <Loader2 className="w-4 h-4 animate-spin" /> 載入中...
