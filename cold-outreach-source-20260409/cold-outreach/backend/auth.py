@@ -10,7 +10,7 @@ from models import User, UserRole
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-me")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = 8
+TOKEN_EXPIRE_HOURS = 168   # 7 天，避免操作中途 token 過期被登出
 
 ALLOWED_DOMAINS = {"wavenet.com.tw", "partner.wavenet.com.tw"}
 ALLOWED_EMAILS = {
