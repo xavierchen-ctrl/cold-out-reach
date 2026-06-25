@@ -582,16 +582,6 @@ export default function LeadDetailPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              size="sm" variant="outline"
-              onClick={() => changeStatus('called_no_answer')}
-              className="border-amber-400 text-amber-700 hover:bg-amber-50"
-            >
-              📵 已撥打未接
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving} className="shadow-sm">
-              {saving ? '儲存中...' : '儲存變更'}
-            </Button>
             <ScoreBadge score={lead.score} />
             <Button size="sm" variant="outline" onClick={handleScore} disabled={scoring}>
               <Star className="w-3.5 h-3.5 md:mr-1.5" />
@@ -1162,6 +1152,19 @@ export default function LeadDetailPage() {
       {activeTab === 'info' && <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 md:gap-6 p-3 md:p-6">
         {/* Left: Edit form */}
         <div className="lg:col-span-2 space-y-4">
+          {/* 主要操作：已撥打未接 / 儲存變更 */}
+          <div className="flex gap-2">
+            <Button
+              size="sm" variant="outline"
+              onClick={() => changeStatus('called_no_answer')}
+              className="border-amber-400 text-amber-700 hover:bg-amber-50"
+            >
+              📵 已撥打未接
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving} className="shadow-sm">
+              {saving ? '儲存中...' : (lead?.status === 'claiming' || form.status === 'claiming') && activities.some(a => a.type === 'call_note') ? '儲存並標記已聯繫' : '儲存變更'}
+            </Button>
+          </div>
           <div className="bg-white border rounded-xl p-5">
             <div className="flex items-center justify-between mb-4">
               <h2 className="font-semibold text-sm">基本資料</h2>
