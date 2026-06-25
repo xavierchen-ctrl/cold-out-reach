@@ -43,6 +43,9 @@ type Tab = '手動管理' | 'CSV 匯入' | '名單爬取' | '待審核'
 
 const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string][]
 const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
+// 篩選下拉隱藏的狀態（已回覆/成交關閉/流失關閉/成交/放棄）
+const FILTER_HIDDEN_STATUSES: LeadStatus[] = ['replied', 'closed_won', 'closed_lost', 'won', 'lost']
+const FILTER_STATUS_OPTIONS = STATUS_OPTIONS.filter(([k]) => !FILTER_HIDDEN_STATUSES.includes(k))
 
 // ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
@@ -1341,7 +1344,7 @@ export default function LeadsPage() {
                 <SelectTrigger className="w-32 md:w-36"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">全部狀態</SelectItem>
-                  {STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                  {FILTER_STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button
