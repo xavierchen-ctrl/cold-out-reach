@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from auth import get_current_user
 from database import get_db
-from models import User, Lead, UserRole
+from models import User, Lead, UserRole, LeadStatus
 
 logger = logging.getLogger(__name__)
 
@@ -259,6 +259,8 @@ async def sync_to_leads(
             website=_val(row, "官網", 500),
             source=source,
             notes="；".join(notes_parts) or None,
+            # 有接洽人代表已有人在處理 → 認領中；否則新名單
+            status=LeadStatus.claiming if am else LeadStatus.new,
         )
 
     # 既有客戶優先
@@ -277,12 +279,21 @@ async def sync_to_leads(
         db.add_all(to_add)
         db.commit()
 
+    # 回補：既有 Ragic 名單若有接洽人但仍為「新名單」→ 改「認領中」
+    backfilled = db.query(Lead).filter(
+        Lead.source.in_(["ragic_既有客戶", "ragic_陌開"]),
+        Lead.status == LeadStatus.new,
+        Lead.notes.ilike("%Ragic 接洽人：%"),
+    ).update({Lead.status: LeadStatus.claiming}, synchronize_session=False)
+    db.commit()
+
     return {
         "ok": True,
         "created_existing": created_existing,
         "created_new": created_new,
         "created_total": created_existing + created_new,
         "skipped": skipped,
+        "status_backfilled": backfilled,
         "ragic_existing_rows": len(existing_rows),
         "ragic_new_rows": len(new_rows),
     }
