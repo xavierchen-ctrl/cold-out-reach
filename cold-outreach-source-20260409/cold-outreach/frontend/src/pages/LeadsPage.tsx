@@ -44,7 +44,7 @@ type Tab = '手動管理' | 'CSV 匯入' | '名單爬取' | '待審核'
 const STATUS_OPTIONS = Object.entries(LEAD_STATUS_LABELS) as [LeadStatus, string][]
 const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
 // 篩選下拉隱藏的狀態（已回覆/成交關閉/流失關閉/成交/放棄）
-const FILTER_HIDDEN_STATUSES: LeadStatus[] = ['replied', 'closed_won', 'closed_lost', 'won', 'lost']
+const FILTER_HIDDEN_STATUSES: LeadStatus[] = ['replied', 'closed_won', 'closed_lost', 'lost']
 const FILTER_STATUS_OPTIONS = STATUS_OPTIONS.filter(([k]) => !FILTER_HIDDEN_STATUSES.includes(k))
 
 // 從備註萃取 Ragic 接洽人（同步時寫成「Ragic 接洽人：XXX」）

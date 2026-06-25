@@ -34,7 +34,7 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   replied: '已回覆',
   closed_won: '成交關閉',
   closed_lost: '流失關閉',
-  won: '成交',
+  won: '已成交',
   lost: '放棄',
 }
 

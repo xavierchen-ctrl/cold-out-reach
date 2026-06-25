@@ -251,6 +251,11 @@ async def sync_to_leads(
             notes_parts.append(f"Ragic 接洽人：{am}")
         if st:
             notes_parts.append(f"狀態：{st}")
+        # 既有客戶＝已成交；陌開有接洽人＝已聯繫，否則新名單
+        if source == "ragic_既有客戶":
+            status = LeadStatus.won
+        else:
+            status = LeadStatus.contacted if am else LeadStatus.new
         return Lead(
             company_name=company[:255],
             contact_name=_val(row, "聯絡人", 255),
@@ -259,8 +264,7 @@ async def sync_to_leads(
             website=_val(row, "官網", 500),
             source=source,
             notes="；".join(notes_parts) or None,
-            # 有接洽人代表已接觸過 → 已聯繫；否則新名單
-            status=LeadStatus.contacted if am else LeadStatus.new,
+            status=status,
         )
 
     # 既有客戶優先
@@ -279,12 +283,18 @@ async def sync_to_leads(
         db.add_all(to_add)
         db.commit()
 
-    # 回補：既有 Ragic 名單若有接洽人但仍為「新名單/認領中」→ 改「已聯繫」
-    backfilled = db.query(Lead).filter(
-        Lead.source.in_(["ragic_既有客戶", "ragic_陌開"]),
+    # 回補既有 Ragic 名單狀態：
+    #  既有客戶 → 已成交（won）；陌開有接洽人 → 已聯繫（contacted）
+    bf1 = db.query(Lead).filter(
+        Lead.source == "ragic_既有客戶",
+        Lead.status.in_([LeadStatus.new, LeadStatus.claiming, LeadStatus.contacted]),
+    ).update({Lead.status: LeadStatus.won}, synchronize_session=False)
+    bf2 = db.query(Lead).filter(
+        Lead.source == "ragic_陌開",
         Lead.status.in_([LeadStatus.new, LeadStatus.claiming]),
         Lead.notes.ilike("%Ragic 接洽人：%"),
     ).update({Lead.status: LeadStatus.contacted}, synchronize_session=False)
+    backfilled = bf1 + bf2
     db.commit()
 
     return {
