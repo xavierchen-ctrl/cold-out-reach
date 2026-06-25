@@ -25,6 +25,10 @@ from schemas import ScraperRunRequest, ScraperJobOut, ScraperImportRequest, Scra
 from auth import get_current_user
 from dedup import build_conflict_index, check_conflict, add_to_index, normalize_company
 
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/scraper", tags=["scraper"])
+
 
 def _release_expired_developments(db: Session):
     """即時釋放：開發中超過 24 小時且未進展（仍為開發中）→ 清空業務、改回認領中。"""
@@ -136,9 +140,6 @@ def develop_status(
             }
     return out
 
-logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/api/scraper", tags=["scraper"])
 
 # ── Sources config (新架構：模組化爬蟲) ─────────────────────────────────────────
 # 格式: source_key -> (module_path, default_url)
