@@ -1083,6 +1083,25 @@ function CompanyView({ leads, onSelect }: { leads: Lead[]; onSelect: (lead: Lead
 }
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
+// ── 分頁列 ────────────────────────────────────────────────────────────────────
+function Pagination({ page, totalPages, total, onPage }: {
+  page: number; totalPages: number; total: number; onPage: (p: number) => void
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 py-3 px-1 text-sm">
+      <span className="text-muted-foreground">
+        共 <span className="font-medium text-foreground">{total}</span> 筆 · 第 {page} / {totalPages} 頁
+      </span>
+      <div className="flex items-center gap-1.5">
+        <Button size="sm" variant="outline" className="h-7 px-2.5" disabled={page <= 1} onClick={() => onPage(1)}>« 第一頁</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2.5" disabled={page <= 1} onClick={() => onPage(page - 1)}>上一頁</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2.5" disabled={page >= totalPages} onClick={() => onPage(page + 1)}>下一頁</Button>
+        <Button size="sm" variant="outline" className="h-7 px-2.5" disabled={page >= totalPages} onClick={() => onPage(totalPages)}>最後頁 »</Button>
+      </div>
+    </div>
+  )
+}
+
 export default function LeadsPage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -1095,6 +1114,8 @@ export default function LeadsPage() {
   const [pendingCount, setPendingCount] = useState(0)
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(true)
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 100
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
@@ -1114,11 +1135,12 @@ export default function LeadsPage() {
   const loadLeads = useCallback(async () => {
     setLoading(true)
     try {
-      const params: Record<string, string> = {}
+      const params: Record<string, string | number> = {}
       if (search) params.search = search
       if (filterStatus !== 'all') params.status = filterStatus
       if (advFilter.tags && advFilter.tags.length > 0) params.tags = advFilter.tags.join(',')
       if (sortContact) params.sort = 'contact_first'
+      params.limit = 10000   // 一次載入全部，改用客戶端分頁
       const res = await getLeads(params)
       setLeads(Array.isArray(res.data) ? res.data : [])
     } finally {
@@ -1152,7 +1174,14 @@ export default function LeadsPage() {
     })
   }
   const toggleAll = () => {
-    setChecked(prev => prev.size === leads.length ? new Set() : new Set(leads.map(l => l.id)))
+    const pageIds = pagedLeads.map(l => l.id)
+    const allOnPage = pageIds.length > 0 && pageIds.every(pid => checked.has(pid))
+    setChecked(prev => {
+      const next = new Set(prev)
+      if (allOnPage) pageIds.forEach(pid => next.delete(pid))
+      else pageIds.forEach(pid => next.add(pid))
+      return next
+    })
   }
   const clearChecked = () => setChecked(new Set())
 
@@ -1248,6 +1277,12 @@ export default function LeadsPage() {
   }
 
   const filteredLeads = applyFilter(leads, advFilter)
+  const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE))
+  const pagedLeads = filteredLeads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  // 搜尋 / 篩選改變時回到第 1 頁；頁碼超出範圍時夾回
+  useEffect(() => { setPage(1) }, [search, filterStatus, sortContact, advFilter])
+  useEffect(() => { if (page > totalPages) setPage(totalPages) }, [page, totalPages])
 
   return (
     <div className="p-3 md:p-6">
@@ -1448,7 +1483,7 @@ export default function LeadsPage() {
             <>
               {/* 手機版：card list */}
               <div className="lg:hidden space-y-3 mt-4">
-                {filteredLeads.map(lead => {
+                {pagedLeads.map(lead => {
                   const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
                   return (
                   <div
@@ -1498,9 +1533,7 @@ export default function LeadsPage() {
                   </div>
                   )
                 })}
-                <div className="text-center text-xs text-muted-foreground py-2">
-                  共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
-                </div>
+                <Pagination page={page} totalPages={totalPages} total={filteredLeads.length} onPage={setPage} />
               </div>
 
               {/* 桌面版：原有 table */}
@@ -1510,7 +1543,7 @@ export default function LeadsPage() {
                     <thead className="bg-muted/50 text-muted-foreground">
                       <tr>
                         <th className="px-3 py-3 w-8">
-                          <input type="checkbox" checked={checked.size === filteredLeads.length && filteredLeads.length > 0} onChange={toggleAll} className="rounded" />
+                          <input type="checkbox" checked={pagedLeads.length > 0 && pagedLeads.every(l => checked.has(l.id))} onChange={toggleAll} className="rounded" />
                         </th>
                         <th className="px-4 py-3 text-left font-medium">公司</th>
                         <th className="px-4 py-3 text-left font-medium">聯絡人</th>
@@ -1527,7 +1560,7 @@ export default function LeadsPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {filteredLeads.map(lead => {
+                      {pagedLeads.map(lead => {
                         const canAccess = isApprover(user) || user?.id === lead.assigned_to || lead.status === 'claiming'
                         return (
                         <tr
@@ -1617,8 +1650,8 @@ export default function LeadsPage() {
                       })}
                     </tbody>
                   </table>
-                  <div className="px-4 py-2 border-t text-xs text-muted-foreground">
-                    共 {filteredLeads.length} 筆（總計 {leads.length} 筆）
+                  <div className="border-t px-2">
+                    <Pagination page={page} totalPages={totalPages} total={filteredLeads.length} onPage={setPage} />
                   </div>
                 </div>
               </div>
