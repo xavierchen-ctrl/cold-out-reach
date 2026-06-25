@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback, useRef } from 'react'
 import { getTemplates, createTemplate, updateTemplate, deleteTemplate } from '@/lib/api'
 import { EmailTemplate } from '@/types'
 import { Button } from '@/components/ui/button'
@@ -37,6 +37,42 @@ function TemplateForm({ initial, onSave, onClose }: TemplateFormProps) {
     template_type: initial?.template_type || 'custom',
   })
   const [saving, setSaving] = useState(false)
+  const subjectRef = useRef<HTMLInputElement>(null)
+  const bodyRef = useRef<HTMLTextAreaElement>(null)
+
+  // 在游標處插入變數（可隨時打字，點按鈕插入）
+  const insertVar = (field: 'subject' | 'body', variable: string) => {
+    const el = (field === 'subject' ? subjectRef : bodyRef).current
+    const cur = form[field]
+    if (el && typeof el.selectionStart === 'number') {
+      const start = el.selectionStart
+      const end = el.selectionEnd ?? start
+      const next = cur.slice(0, start) + variable + cur.slice(end)
+      setForm(f => ({ ...f, [field]: next }))
+      requestAnimationFrame(() => {
+        el.focus()
+        const pos = start + variable.length
+        el.setSelectionRange(pos, pos)
+      })
+    } else {
+      setForm(f => ({ ...f, [field]: cur + variable }))
+    }
+  }
+
+  const VarButtons = ({ field }: { field: 'subject' | 'body' }) => (
+    <div className="flex gap-1">
+      {['{{company_name}}', '{{contact_name}}'].map(v => (
+        <button
+          key={v}
+          type="button"
+          onClick={() => insertVar(field, v)}
+          className="text-[11px] px-2 py-0.5 rounded border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors font-mono"
+        >
+          {v}
+        </button>
+      ))}
+    </div>
+  )
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -79,29 +115,32 @@ function TemplateForm({ initial, onSave, onClose }: TemplateFormProps) {
             </div>
           </div>
           <div>
-            <Label>主旨 *</Label>
+            <div className="flex items-center justify-between mb-1">
+              <Label>主旨 *</Label>
+              <VarButtons field="subject" />
+            </div>
             <Input
+              ref={subjectRef}
               value={form.subject}
               onChange={e => setForm(f => ({ ...f, subject: e.target.value }))}
               required
-              className="mt-1"
-              placeholder="支援 {{company_name}} {{contact_name}} 等變數"
+              placeholder="輸入主旨，點右上方按鈕插入變數"
             />
           </div>
           <div>
-            <Label>內文 *</Label>
+            <div className="flex items-center justify-between mb-1">
+              <Label>內文 *</Label>
+              <VarButtons field="body" />
+            </div>
             <Textarea
+              ref={bodyRef}
               value={form.body}
               onChange={e => setForm(f => ({ ...f, body: e.target.value }))}
               required
               rows={12}
-              className="mt-1 font-mono text-sm"
-              placeholder="支援 {{company_name}} {{contact_name}} {{industry}} 等變數"
+              className="font-mono text-sm"
+              placeholder="輸入內文，點右上方按鈕插入變數"
             />
-          </div>
-          <div className="text-xs text-muted-foreground bg-muted p-3 rounded">
-            可用變數：<code>{'{{company_name}}'}</code>、<code>{'{{contact_name}}'}</code>、
-            <code>{'{{industry}}'}</code>、<code>{'{{city}}'}</code>
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="outline" onClick={onClose}>取消</Button>
