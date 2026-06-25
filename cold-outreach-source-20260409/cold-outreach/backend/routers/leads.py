@@ -103,8 +103,12 @@ def list_leads(
     # 資料權限：admin/主管=全部；小組長=自己組；業務=自己（+ 可認領的 claiming 名單池）
     visible_ids = get_visible_user_ids(current_user, db)
     if visible_ids is not None:
-        # 主管=全部；小組長=組內；業務=自己（嚴格只看負責的名單）
-        q = q.filter(Lead.assigned_to.in_(visible_ids))
+        # 看得到：負責的名單（自己/組內/部門） + 認領中且無業務的公開名單池
+        from sqlalchemy import or_ as _or, and_ as _and
+        q = q.filter(_or(
+            Lead.assigned_to.in_(visible_ids),
+            _and(Lead.status == LeadStatus.claiming, Lead.assigned_to.is_(None)),
+        ))
     if status:
         q = q.filter(Lead.status == status)
     # 依業務（接洽人）篩選：admin/主管/小組長可用

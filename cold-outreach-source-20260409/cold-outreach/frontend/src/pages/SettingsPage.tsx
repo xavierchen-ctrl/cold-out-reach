@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { getTags, createTag, deleteTag, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail } from '@/lib/api'
+import { getTags, createTag, deleteTag, getUsers, createUser, updateUser, deleteUser, getTeams, createTeam, updateTeam, deleteTeam, changePassword, getGmailAuthUrl, getGmailStatus, disconnectGmail, getManagerScope } from '@/lib/api'
 import { Tag, User as UserType, Team } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -200,7 +200,7 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
   const [showCreate, setShowCreate] = useState(false)
   const [editingUser, setEditingUser] = useState<UserType | null>(null)
   const [form, setForm] = useState({ name: '', email: '', password: '', role: 'sales' })
-  const [editForm, setEditForm] = useState({ name: '', role: 'sales', password: '', team_id: '' })
+  const [editForm, setEditForm] = useState({ name: '', role: 'sales', password: '', team_id: '', manager_team_ids: [] as string[] })
   const [saving, setSaving] = useState(false)
   const [filterName, setFilterName] = useState('')
   const [filterEmail, setFilterEmail] = useState('')
@@ -248,12 +248,13 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
     if (!editingUser) return
     setSaving(true)
     try {
-      const payload: { name?: string; role?: string; password?: string; team_id?: string | null } = {
+      const payload: { name?: string; role?: string; password?: string; team_id?: string | null; manager_team_ids?: string[] } = {
         name: editForm.name || undefined,
         role: editForm.role || undefined,
         team_id: editForm.team_id || null,
       }
       if (editForm.password) payload.password = editForm.password
+      if (editForm.role === 'manager') payload.manager_team_ids = editForm.manager_team_ids
       await updateUser(editingUser.id, payload)
       setEditingUser(null)
       await loadData()
@@ -350,7 +351,10 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                   <div className="flex gap-1">
                     <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => {
                       setEditingUser(u)
-                      setEditForm({ name: u.name, role: u.role, password: '', team_id: u.team_id ?? '' })
+                      setEditForm({ name: u.name, role: u.role, password: '', team_id: u.team_id ?? '', manager_team_ids: [] })
+                      if (u.role === 'manager') {
+                        getManagerScope(u.id).then(r => setEditForm(f => ({ ...f, manager_team_ids: r.data.team_ids || [] }))).catch(() => {})
+                      }
                     }}>
                       ✏️
                     </Button>
@@ -437,6 +441,31 @@ function UsersTab({ currentUserId }: { currentUserId: string }) {
                 </SelectContent>
               </Select>
             </div>
+            {editForm.role === 'manager' && (
+              <div>
+                <Label>主管可管理的組 <span className="text-muted-foreground font-normal text-xs">（勾選的組成員名單此主管才看得到；不勾＝看全部）</span></Label>
+                <div className="mt-1 border rounded-lg p-2 max-h-40 overflow-y-auto space-y-1">
+                  {teams.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">尚無部門，請先到「部門管理」建立組</p>
+                  ) : teams.map(t => (
+                    <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="rounded"
+                        checked={editForm.manager_team_ids.includes(t.id)}
+                        onChange={e => setEditForm(f => ({
+                          ...f,
+                          manager_team_ids: e.target.checked
+                            ? [...f.manager_team_ids, t.id]
+                            : f.manager_team_ids.filter(x => x !== t.id),
+                        }))}
+                      />
+                      {t.name}
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
             <div>
               <Label>新密碼 <span className="text-muted-foreground font-normal text-xs">（留空表示不修改）</span></Label>
               <PasswordInput value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))} className="mt-1" placeholder="不修改請留空" />

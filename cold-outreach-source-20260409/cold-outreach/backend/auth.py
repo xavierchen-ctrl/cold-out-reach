@@ -31,8 +31,17 @@ ALLOWED_EMAILS = {
 
 def get_visible_user_ids(current_user, db) -> list | None:
     """None = unrestricted. Otherwise returns list of visible user IDs."""
-    if current_user.role in (UserRole.admin, UserRole.manager):
-        return None  # admin & manager 可看全部
+    if current_user.role == UserRole.admin:
+        return None  # admin 看全部
+    if current_user.role == UserRole.manager:
+        # 主管：看「可管理的組（ManagerScope）」所有成員；未設定 → 看全部（相容）
+        from models import ManagerScope
+        team_ids = [m.team_id for m in db.query(ManagerScope).filter(ManagerScope.manager_id == current_user.id).all()]
+        if not team_ids:
+            return None
+        ids = [u.id for u in db.query(User).filter(User.team_id.in_(team_ids)).all()]
+        ids.append(current_user.id)
+        return ids
     if current_user.role == UserRole.team_lead:
         # 小組長：看自己組所有成員（含自己）
         return [u.id for u in db.query(User).filter(User.team_id == current_user.team_id).all()]

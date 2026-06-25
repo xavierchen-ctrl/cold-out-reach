@@ -275,9 +275,10 @@ export const getPipelineHealthCached = (refresh = false) =>
 export const getUsers = () => api.get('/auth/users')
 export const createUser = (data: { name: string; email: string; password: string; role: string }) =>
   api.post('/auth/users', data)
-export const updateUser = (id: string, data: { name?: string; role?: string; password?: string; team_id?: string | null }) =>
+export const updateUser = (id: string, data: { name?: string; role?: string; password?: string; team_id?: string | null; manager_team_ids?: string[] }) =>
   api.put(`/auth/users/${id}`, data)
 export const deleteUser = (id: string) => api.delete(`/auth/users/${id}`)
+export const getManagerScope = (userId: string) => api.get<{ team_ids: string[] }>(`/auth/users/${userId}/manager-scope`)
 
 // ── Teams ─────────────────────────────────────────────────────────────────────
 export const getTeams = () => api.get('/teams')

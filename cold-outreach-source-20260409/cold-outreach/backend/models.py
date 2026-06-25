@@ -217,6 +217,14 @@ class EmailTemplate(Base):
     created_at = Column(DateTime, default=now_tw)
 
 
+class ManagerScope(Base):
+    """主管可管理的組（部→組）：主管只看得到這些組成員的名單；未設定則看全部。"""
+    __tablename__ = "manager_scopes"
+
+    manager_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), primary_key=True)
+
+
 class LeadDevelopment(Base):
     """開發中鎖定：業務在爬蟲預覽頁勾選名單即建立，24 小時未進展自動釋放。"""
     __tablename__ = "lead_developments"

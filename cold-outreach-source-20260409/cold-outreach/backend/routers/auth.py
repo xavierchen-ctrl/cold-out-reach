@@ -95,6 +95,7 @@ class UpdateUserBody(BaseModel):
     role: Optional[UserRole] = None
     password: Optional[str] = None
     team_id: Optional[UUID] = None
+    manager_team_ids: Optional[List[UUID]] = None   # 主管可管理的組
 
 
 @router.post("/users", response_model=UserOut)
@@ -144,9 +145,25 @@ def update_user(
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         user.hashed_password = hash_password(body.password)
+    if body.manager_team_ids is not None:
+        from models import ManagerScope
+        db.query(ManagerScope).filter(ManagerScope.manager_id == user.id).delete()
+        for tid in body.manager_team_ids:
+            db.add(ManagerScope(manager_id=user.id, team_id=tid))
     db.commit()
     db.refresh(user)
     return user
+
+
+@router.get("/users/{user_id}/manager-scope")
+def get_manager_scope(
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    from models import ManagerScope
+    rows = db.query(ManagerScope).filter(ManagerScope.manager_id == user_id).all()
+    return {"team_ids": [str(r.team_id) for r in rows]}
 
 
 class ChangePasswordBody(BaseModel):
