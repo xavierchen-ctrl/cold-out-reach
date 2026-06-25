@@ -1303,7 +1303,10 @@ export default function LeadsPage() {
   // 業務篩選選項（系統業務 + Ragic 帶入的業務，去重）
   const salesOptions = Array.from(new Set(leads.map(leadSalesName).filter(Boolean))).sort()
   const filteredLeads = applyFilter(leads, advFilter)
-    .filter(l => filterSales === 'all' || leadSalesName(l) === filterSales)
+    .filter(l => {
+      if (!filterSales || filterSales === 'all') return true
+      return leadSalesName(l).toLowerCase().includes(filterSales.toLowerCase())
+    })
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE))
   const pagedLeads = filteredLeads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
@@ -1371,13 +1374,18 @@ export default function LeadsPage() {
                   {FILTER_STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Select value={filterSales} onValueChange={setFilterSales}>
-                <SelectTrigger className="w-32 md:w-40"><SelectValue placeholder="全部業務" /></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  <SelectItem value="all">全部業務</SelectItem>
-                  {salesOptions.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="relative">
+                <Input
+                  list="sales-filter-options"
+                  className="w-32 md:w-44"
+                  placeholder="🔍 業務（可打字）"
+                  value={filterSales === 'all' ? '' : filterSales}
+                  onChange={e => setFilterSales(e.target.value || 'all')}
+                />
+                <datalist id="sales-filter-options">
+                  {salesOptions.map(name => <option key={name} value={name} />)}
+                </datalist>
+              </div>
               <Button
                 variant={showFilterSidebar ? 'default' : 'outline'}
                 size="sm"
