@@ -54,6 +54,11 @@ function ragicContact(notes?: string | null): string {
   return m ? m[1].trim() : ''
 }
 
+// 名單的業務名稱：優先系統指派業務，否則 Ragic 帶入的業務
+function leadSalesName(lead: Lead): string {
+  return lead.assigned_user?.name || ragicContact(lead.notes) || ''
+}
+
 // ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const color = LEAD_STATUS_COLORS[status as LeadStatus] ?? 'bg-gray-100 text-gray-500'
@@ -1128,6 +1133,7 @@ export default function LeadsPage() {
   const PAGE_SIZE = 100
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterSales, setFilterSales] = useState<string>('all')
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [checked, setChecked] = useState<Set<string>>(new Set())
@@ -1286,12 +1292,15 @@ export default function LeadsPage() {
     }
   }
 
+  // 業務篩選選項（系統業務 + Ragic 帶入的業務，去重）
+  const salesOptions = Array.from(new Set(leads.map(leadSalesName).filter(Boolean))).sort()
   const filteredLeads = applyFilter(leads, advFilter)
+    .filter(l => filterSales === 'all' || leadSalesName(l) === filterSales)
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / PAGE_SIZE))
   const pagedLeads = filteredLeads.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   // 搜尋 / 篩選改變時回到第 1 頁；頁碼超出範圍時夾回
-  useEffect(() => { setPage(1) }, [search, filterStatus, sortContact, advFilter])
+  useEffect(() => { setPage(1) }, [search, filterStatus, filterSales, sortContact, advFilter])
   useEffect(() => { if (page > totalPages) setPage(totalPages) }, [page, totalPages])
 
   return (
@@ -1352,6 +1361,13 @@ export default function LeadsPage() {
                 <SelectContent>
                   <SelectItem value="all">全部狀態</SelectItem>
                   {FILTER_STATUS_OPTIONS.map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Select value={filterSales} onValueChange={setFilterSales}>
+                <SelectTrigger className="w-32 md:w-40"><SelectValue placeholder="全部業務" /></SelectTrigger>
+                <SelectContent className="max-h-72">
+                  <SelectItem value="all">全部業務</SelectItem>
+                  {salesOptions.map(name => <SelectItem key={name} value={name}>{name}</SelectItem>)}
                 </SelectContent>
               </Select>
               <Button
@@ -1560,7 +1576,7 @@ export default function LeadsPage() {
                         <th className="px-4 py-3 text-left font-medium">Email</th>
                         <th className="px-4 py-3 text-left font-medium">電話</th>
                         <th className="px-4 py-3 text-left font-medium">官網</th>
-                        <th className="px-4 py-3 text-left font-medium">接洽人</th>
+                        <th className="px-4 py-3 text-left font-medium">業務</th>
                         <th className="px-4 py-3 text-left font-medium">狀態</th>
                         <th className="px-4 py-3 text-left font-medium">評分</th>
                         <th className="px-4 py-3 text-left font-medium cursor-pointer hover:text-primary" title="點擊依熱度排序">熱度 🔥</th>

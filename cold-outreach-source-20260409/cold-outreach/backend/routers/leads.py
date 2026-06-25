@@ -96,10 +96,15 @@ def list_leads(
     current_user: User = Depends(get_current_user),
 ):
     q = db.query(Lead)
-    # All roles can see all leads; ownership is enforced at the detail level
+    # 資料權限：admin/主管=全部；小組長=自己組；業務=自己（+ 可認領的 claiming 名單池）
+    visible_ids = get_visible_user_ids(current_user, db)
+    if visible_ids is not None:
+        from sqlalchemy import or_ as _or
+        q = q.filter(_or(Lead.assigned_to.in_(visible_ids), Lead.status == LeadStatus.claiming))
     if status:
         q = q.filter(Lead.status == status)
-    if assigned_to and current_user.role == UserRole.admin:
+    # 依業務（接洽人）篩選：admin/主管/小組長可用
+    if assigned_to and current_user.role in (UserRole.admin, UserRole.manager, UserRole.team_lead):
         q = q.filter(Lead.assigned_to == assigned_to)
     if search:
         like = f"%{search}%"
