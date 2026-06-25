@@ -47,6 +47,13 @@ const PIPELINE = Object.keys(LEAD_STATUS_LABELS) as LeadStatus[]
 const FILTER_HIDDEN_STATUSES: LeadStatus[] = ['replied', 'closed_won', 'closed_lost', 'won', 'lost']
 const FILTER_STATUS_OPTIONS = STATUS_OPTIONS.filter(([k]) => !FILTER_HIDDEN_STATUSES.includes(k))
 
+// 從備註萃取 Ragic 接洽人（同步時寫成「Ragic 接洽人：XXX」）
+function ragicContact(notes?: string | null): string {
+  if (!notes) return ''
+  const m = notes.match(/Ragic 接洽人：([^；;\n]+)/)
+  return m ? m[1].trim() : ''
+}
+
 // ── Status Badge ──────────────────────────────────────────────────────────────
 function StatusBadge({ status }: { status: string }) {
   const color = LEAD_STATUS_COLORS[status as LeadStatus] ?? 'bg-gray-100 text-gray-500'
@@ -1611,7 +1618,11 @@ export default function LeadsPage() {
                             ) : <span className="text-xs text-gray-300">—</span>}
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {lead.assigned_user?.name || <span className="text-gray-300">—</span>}
+                            {lead.assigned_user?.name
+                              ? lead.assigned_user.name
+                              : ragicContact(lead.notes)
+                              ? <span className="text-gray-400" title="來自 Ragic 接洽人">{ragicContact(lead.notes)}</span>
+                              : <span className="text-gray-300">—</span>}
                           </td>
                           <td className="px-4 py-3"><StatusBadge status={lead.status} /></td>
                           <td className="px-4 py-3"><ScoreBadge score={lead.score} /></td>
