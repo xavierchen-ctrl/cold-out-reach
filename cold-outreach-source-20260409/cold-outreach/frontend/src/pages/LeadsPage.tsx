@@ -735,6 +735,7 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
   const [keyword, setKeyword] = useState('')
   const [industry, setIndustry] = useState('')
   const [industryOther, setIndustryOther] = useState('')
+  const [region, setRegion] = useState('')
   const [limit, setLimit] = useState(10)
   const [icps, setIcps] = useState<ICPProfile[]>([])
   const [jobs, setJobs] = useState<ScraperJob[]>([])
@@ -764,10 +765,11 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
         industry === INDUSTRY_OTHER ? industryOther.trim()
         : industry === 'all' ? ''
         : industry
+      const kw = [keyword, region].filter(Boolean).join(' ')
       const res = await runScraper(
         source,
         url !== SCRAPER_DEFAULT_URLS[source] ? url : undefined,
-        keyword || undefined,
+        kw || undefined,
         realIndustry || undefined,
         limit
       )
@@ -929,6 +931,15 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
                 onChange={e => setIndustryOther(e.target.value)}
               />
             )}
+          </div>
+          <div>
+            <Label>地區 <span className="text-muted-foreground font-normal">（選填，會併入搜尋條件）</span></Label>
+            <Input
+              className="mt-1"
+              placeholder="例：台北、台中、高雄"
+              value={region}
+              onChange={e => setRegion(e.target.value)}
+            />
           </div>
           <div>
             <Label>最多筆數</Label>

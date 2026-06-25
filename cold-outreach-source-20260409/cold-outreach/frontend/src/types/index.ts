@@ -18,6 +18,7 @@ export interface User {
 export type LeadStatus =
   | 'new'
   | 'claiming'
+  | 'mql'
   | 'contacted'
   | 'called_no_answer'
   | 'replied'
@@ -29,6 +30,7 @@ export type LeadStatus =
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   new: '新名單',
   claiming: '認領中',
+  mql: '開發中',
   contacted: '已聯繫',
   called_no_answer: '已撥打未接',
   replied: '已回覆',
@@ -41,6 +43,7 @@ export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
 export const LEAD_STATUS_COLORS: Record<LeadStatus, string> = {
   new: 'bg-gray-100 text-gray-700',
   claiming: 'bg-sky-100 text-sky-700',
+  mql: 'bg-purple-100 text-purple-700',
   contacted: 'bg-blue-100 text-blue-700',
   called_no_answer: 'bg-amber-100 text-amber-700',
   replied: 'bg-yellow-100 text-yellow-700',

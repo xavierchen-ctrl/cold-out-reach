@@ -18,10 +18,123 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db, SessionLocal
-from models import User, Lead, LeadStatus, ScraperJob, ScraperJobStatus, UserRole, PendingLeadApproval
+from datetime import timedelta
+from pydantic import BaseModel
+from models import User, Lead, LeadStatus, ScraperJob, ScraperJobStatus, UserRole, PendingLeadApproval, LeadDevelopment
 from schemas import ScraperRunRequest, ScraperJobOut, ScraperImportRequest, ScrapedCompany
 from auth import get_current_user
 from dedup import build_conflict_index, check_conflict, add_to_index, normalize_company
+
+
+def _release_expired_developments(db: Session):
+    """即時釋放：開發中超過 24 小時且未進展（仍為開發中）→ 清空業務、改回認領中。"""
+    cutoff = now_tw() - timedelta(hours=24)
+    expired = db.query(LeadDevelopment).filter(LeadDevelopment.started_at < cutoff).all()
+    for d in expired:
+        lead = db.query(Lead).filter(Lead.id == d.lead_id).first()
+        if lead and lead.status == LeadStatus.mql:   # 開發中未進展
+            lead.status = LeadStatus.claiming
+            lead.assigned_to = None
+        db.delete(d)
+    if expired:
+        db.commit()
+
+
+class DevelopRequest(BaseModel):
+    company: dict           # 爬蟲預覽的公司資料
+    job_id: UUID | None = None
+
+
+class DevelopStatusRequest(BaseModel):
+    company_names: List[str]
+
+
+@router.post("/develop")
+def develop_lead(
+    body: DevelopRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """業務在預覽頁勾選名單 → 認定開發中（掛上業務、24h 計時）。
+    若該公司已被其他業務開發中 → 回傳 locked。
+    """
+    _release_expired_developments(db)
+
+    c = body.company or {}
+    name = (c.get("company_name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="缺少公司名稱")
+    norm = normalize_company(name)
+
+    # 找既有同名名單
+    existing = None
+    for l in db.query(Lead).all():
+        if normalize_company(l.company_name) == norm:
+            existing = l
+            break
+
+    # 已被別人開發中 → 鎖定
+    if existing and existing.status == LeadStatus.mql and existing.assigned_to and existing.assigned_to != current_user.id:
+        dev = db.query(LeadDevelopment).filter(LeadDevelopment.lead_id == existing.id).first()
+        developer = db.query(User).filter(User.id == existing.assigned_to).first()
+        return {
+            "locked": True,
+            "developer_name": developer.name if developer else "其他業務",
+        }
+
+    if existing:
+        lead = existing
+        lead.status = LeadStatus.mql
+        lead.assigned_to = current_user.id
+        # 補空白欄位
+        for field in ["email", "phone", "website", "contact_name", "title", "city", "industry"]:
+            if not getattr(lead, field, None) and c.get(field):
+                setattr(lead, field, c.get(field))
+    else:
+        lead = Lead(
+            company_name=name[:255],
+            contact_name=(c.get("contact_name") or None),
+            email=(c.get("email") or None),
+            phone=(c.get("phone") or None),
+            website=(c.get("website") or None),
+            industry=(c.get("industry") or None),
+            city=(c.get("city") or None),
+            source=f"exhibition:{c.get('source') or 'scraper'}",
+            assigned_to=current_user.id,
+            status=LeadStatus.mql,
+        )
+        db.add(lead)
+        db.flush()
+
+    dev = db.query(LeadDevelopment).filter(LeadDevelopment.lead_id == lead.id).first()
+    if dev:
+        dev.developer_id = current_user.id
+        dev.started_at = now_tw()
+    else:
+        db.add(LeadDevelopment(lead_id=lead.id, developer_id=current_user.id, started_at=now_tw()))
+    db.commit()
+    return {"locked": False, "ok": True, "lead_id": str(lead.id), "developer_name": current_user.name}
+
+
+@router.post("/develop-status")
+def develop_status(
+    body: DevelopStatusRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """回傳預覽頁各公司的開發中狀態：{ company_norm: {developer_name, mine} }"""
+    _release_expired_developments(db)
+    norm_set = {normalize_company(n): n for n in body.company_names}
+    out: dict = {}
+    for lead in db.query(Lead).filter(Lead.status == LeadStatus.mql).all():
+        ln = normalize_company(lead.company_name)
+        if ln in norm_set:
+            developer = db.query(User).filter(User.id == lead.assigned_to).first() if lead.assigned_to else None
+            out[ln] = {
+                "developer_name": developer.name if developer else "業務",
+                "mine": lead.assigned_to == current_user.id,
+            }
+    return out
 
 logger = logging.getLogger(__name__)
 

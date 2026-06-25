@@ -1,9 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck, ImportConflict } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck, ImportConflict, developScrapedLead, getScraperDevelopStatus } from '@/lib/api'
 import ConflictReviewDialog from '@/components/ConflictReviewDialog'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, Database } from 'lucide-react'
+import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, Database, Globe } from 'lucide-react'
+
+// 與後端一致的公司名正規化（比對開發中狀態）
+const _SUFFIXES = ['股份有限公司','有限公司','股份公司','企業社','工作室','公司','co.,ltd.','co., ltd.','co.ltd','co ltd','ltd.','ltd','inc.','inc','corporation','corp.','corp','company','co.','group','集團']
+function normCompany(name: string): string {
+  let n = (name || '').trim().toLowerCase()
+  for (const s of _SUFFIXES) n = n.split(s).join('')
+  n = n.replace(/台灣|臺灣|分公司|总公司|總公司/g, '')
+  n = n.replace(/[\s\-_、,.()（）&·.]/g, '')
+  return n
+}
 
 interface ScrapedCompany {
   company_name: string
@@ -40,6 +50,72 @@ export default function ScraperJobPage() {
   // Ragic 重複檢查：company_name -> 'existing' | 'new' | 'none'
   const [ragicStatus, setRagicStatus] = useState<Map<string, 'existing' | 'new'>>(new Map())
   const [ragicChecking, setRagicChecking] = useState(false)
+  // 開發中狀態：company_norm -> { developer_name, mine }
+  const [devMap, setDevMap] = useState<Map<string, { developer_name: string; mine: boolean }>>(new Map())
+  const [claiming, setClaiming] = useState<Set<number>>(new Set())
+
+  const loadDevStatus = async (list: ScrapedCompany[]) => {
+    const names = list.map(c => c.company_name).filter(Boolean)
+    if (names.length === 0) return
+    try {
+      const res = await getScraperDevelopStatus(names)
+      const m = new Map<string, { developer_name: string; mine: boolean }>()
+      for (const [k, v] of Object.entries(res.data || {})) m.set(k, v)
+      setDevMap(m)
+    } catch { /* ignore */ }
+  }
+
+  // 業務勾選 → 認領為開發中
+  const handleToggleDevelop = async (idx: number) => {
+    const c = companies[idx]
+    if (!c?.company_name) return
+    const norm = normCompany(c.company_name)
+    const cur = devMap.get(norm)
+    if (cur && !cur.mine) { alert(`「${c.company_name}」該名單正在被開發中（業務：${cur.developer_name}）`); return }
+    if (cur && cur.mine) return   // 已是自己的開發中
+    if (claiming.has(idx)) return
+    setClaiming(prev => new Set(prev).add(idx))
+    try {
+      const res = await developScrapedLead(c as unknown as Record<string, unknown>, id)
+      if (res.data.locked) {
+        alert(`「${c.company_name}」該名單正在被開發中（業務：${res.data.developer_name}）`)
+        await loadDevStatus(companies)
+        return
+      }
+      setDevMap(prev => new Map(prev).set(norm, { developer_name: res.data.developer_name || '我', mine: true }))
+      // 一天提醒一次
+      const key = 'dev_reminder_' + new Date().toISOString().slice(0, 10)
+      if (!localStorage.getItem(key)) {
+        alert('請於 24 小時後更新客戶資料，如未更新該客戶將開放所有業務認領')
+        localStorage.setItem(key, '1')
+      }
+    } catch (e: any) {
+      alert(e?.response?.data?.detail || '認領失敗，請稍後再試')
+    } finally {
+      setClaiming(prev => { const s = new Set(prev); s.delete(idx); return s })
+    }
+  }
+
+  const handleBulkFindWebsite = async () => {
+    const pending = companies.map((c, i) => ({ c, i })).filter(({ c }) => !c.website)
+    if (pending.length === 0) return
+    setBulkFinding(true)
+    setBulkProgress({ done: 0, total: pending.length })
+    for (const { c, i } of pending) {
+      setFindingWebsite(prev => new Set(prev).add(i))
+      try {
+        const res = await findCompanyWebsite(c.company_name, c.city)
+        const website: string | null = res.data.website
+        if (website) {
+          setCompanies(prev => prev.map((x, xi) => xi === i ? { ...x, website } : x))
+          if (id) await updateScraperJobField(id, i, 'website', website)
+        }
+      } catch { /* 單筆失敗繼續 */ }
+      setFindingWebsite(prev => { const s = new Set(prev); s.delete(i); return s })
+      setBulkProgress(p => ({ ...p, done: p.done + 1 }))
+    }
+    setBulkFinding(false)
+  }
 
   const handleRagicCheck = async () => {
     if (companies.length === 0) return
@@ -67,6 +143,7 @@ export default function ScraperJobPage() {
       try {
         const res = await previewScraperJob(id)
         setCompanies(res.data.companies || [])
+        loadDevStatus(res.data.companies || [])
       } catch (err: any) {
         setError(err?.response?.data?.detail || '無法取得任務資料，或任務尚未完成')
       } finally {
@@ -215,7 +292,8 @@ export default function ScraperJobPage() {
             <h1 className="text-xl font-bold text-gray-900">爬蟲名單檢視</h1>
             <p className="text-sm text-muted-foreground">
               總共 {companies.length} 筆　有電話 {withPhoneCount} 筆　有 Email {withEmailCount} 筆
-              {someSelected && <span className="ml-2 text-primary font-medium">已勾選 {selectedIndices.size} 筆</span>}
+              <span className="ml-2 text-purple-600 font-medium">我的開發中 {Array.from(devMap.values()).filter(v => v.mine).length} 筆</span>
+              <span className="ml-1 text-xs text-muted-foreground">（勾選名單＝認領為開發中）</span>
             </p>
           </div>
         </div>
@@ -246,12 +324,19 @@ export default function ScraperJobPage() {
                   : <><Search className="w-4 h-4 mr-2" />批量查找電話 ({companies.filter(c => !c.phone).length})</>
                 }
               </Button>
+              <Button
+                variant="outline"
+                onClick={handleBulkFindWebsite}
+                disabled={bulkFinding || companies.filter(c => !c.website).length === 0}
+                className="shadow-sm"
+              >
+                {bulkFinding
+                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />查找中 {bulkProgress.done}/{bulkProgress.total}</>
+                  : <><Globe className="w-4 h-4 mr-2" />一鍵查詢網址 ({companies.filter(c => !c.website).length})</>
+                }
+              </Button>
             </>
           )}
-          <Button onClick={handleImport} disabled={importing} className="shadow-sm">
-            <Download className="w-4 h-4 mr-2" />
-            {importing ? '匯入中...' : `匯入名單 (${importCount})`}
-          </Button>
         </div>
       </header>
 
@@ -261,16 +346,7 @@ export default function ScraperJobPage() {
           <table className="w-full text-left">
             <thead className="bg-gray-50 text-gray-600 font-medium">
               <tr>
-                <th className="py-3 px-4 w-10">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
-                    onChange={toggleAll}
-                    className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
-                    title={allSelected ? '取消全選' : '全選'}
-                  />
-                </th>
+                <th className="py-3 px-4 w-12 text-center text-gray-400 text-xs">開發</th>
                 <th className="py-3 px-4 text-center text-gray-400 w-10">#</th>
                 {isPostsMode ? (
                   <>
@@ -295,19 +371,25 @@ export default function ScraperJobPage() {
             </thead>
             <tbody className="divide-y divide-gray-100">
               {companies.map((c, idx) => {
-                const checked = selectedIndices.has(idx)
+                const norm = normCompany(c.company_name)
+                const dev = devMap.get(norm)
+                const mine = !!dev?.mine
+                const lockedByOther = !!dev && !dev.mine
+                const checked = mine
                 return (
                   <tr
                     key={idx}
-                    onClick={() => toggleOne(idx)}
-                    className={`transition-colors cursor-pointer ${checked ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-50'}`}
+                    onClick={() => handleToggleDevelop(idx)}
+                    className={`transition-colors cursor-pointer ${mine ? 'bg-purple-50 hover:bg-purple-100' : lockedByOther ? 'bg-gray-50 opacity-70' : 'hover:bg-gray-50'}`}
                   >
                     <td className="py-4 px-4" onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={checked}
-                        onChange={() => toggleOne(idx)}
+                        disabled={lockedByOther || claiming.has(idx)}
+                        onChange={() => handleToggleDevelop(idx)}
                         className="rounded text-primary focus:ring-primary w-4 h-4 cursor-pointer"
+                        title={lockedByOther ? `開發中（${dev?.developer_name}）` : '勾選＝認領為開發中'}
                       />
                     </td>
 
@@ -370,6 +452,11 @@ export default function ScraperJobPage() {
                                 )}
                                 {ragicStatus.get(c.company_name) === 'new' && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-normal" title="已在 Ragic 陌開表">陌開中</span>
+                                )}
+                                {dev && (
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-normal ${mine ? 'bg-purple-100 text-purple-700' : 'bg-gray-200 text-gray-600'}`} title="開發中">
+                                    開發中{mine ? '（我）' : `（${dev.developer_name}）`}
+                                  </span>
                                 )}
                               </div>
                               {c.industry && <span className="text-xs text-muted-foreground mt-0.5 block md:hidden">{c.industry}</span>}

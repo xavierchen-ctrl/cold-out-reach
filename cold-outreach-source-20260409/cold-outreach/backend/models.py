@@ -217,6 +217,15 @@ class EmailTemplate(Base):
     created_at = Column(DateTime, default=now_tw)
 
 
+class LeadDevelopment(Base):
+    """開發中鎖定：業務在爬蟲預覽頁勾選名單即建立，24 小時未進展自動釋放。"""
+    __tablename__ = "lead_developments"
+
+    lead_id = Column(UUID(as_uuid=True), ForeignKey("leads.id", ondelete="CASCADE"), primary_key=True)
+    developer_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    started_at = Column(DateTime, default=now_tw)
+
+
 class SentTemplateLog(Base):
     """小郵差群發紀錄：同一家公司同一模板只發一次（防重複寄送）。"""
     __tablename__ = "sent_template_logs"

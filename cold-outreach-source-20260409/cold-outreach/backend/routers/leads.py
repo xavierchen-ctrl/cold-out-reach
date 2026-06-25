@@ -95,6 +95,10 @@ def list_leads(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # 即時釋放超過 24h 未進展的「開發中」名單（→ 認領中）
+    from routers.scraper import _release_expired_developments
+    _release_expired_developments(db)
+
     q = db.query(Lead)
     # 資料權限：admin/主管=全部；小組長=自己組；業務=自己（+ 可認領的 claiming 名單池）
     visible_ids = get_visible_user_ids(current_user, db)

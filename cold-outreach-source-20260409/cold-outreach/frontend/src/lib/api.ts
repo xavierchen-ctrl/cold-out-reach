@@ -222,6 +222,14 @@ export const importScraperJob = (
     confirmed: opts?.confirmed, conflict_actions: opts?.conflict_actions,
   })
 
+// 開發中：業務在預覽頁勾選名單認領為開發中
+export const developScrapedLead = (company: Record<string, unknown>, jobId?: string) =>
+  api.post<{ locked: boolean; ok?: boolean; lead_id?: string; developer_name?: string }>(
+    '/scraper/develop', { company, job_id: jobId })
+export const getScraperDevelopStatus = (company_names: string[]) =>
+  api.post<Record<string, { developer_name: string; mine: boolean }>>(
+    '/scraper/develop-status', { company_names })
+
 // 衝突項目型別（爬蟲/CSV 匯入時與系統現有名單相似）
 export interface ImportConflict {
   company_name: string
