@@ -89,12 +89,14 @@ export default function LeadDetailPage() {
   // 儲存後同步到 Ragic 陌開表（best-effort，不阻擋儲存）
   const syncRagicSilently = async (l: Partial<Lead>) => {
     if (!l.company_name || !l.contact_name || !l.phone) return
+    // 負責人＝名單指派的業務（Ragic 為選使用者欄位，名字需與 Ragic 帳號一致）
+    const amName = l.assigned_user?.name || user?.name || 'unknown'
     try {
       await ragicUpsertNewClient({
         company_name: l.company_name,
         client_contact: l.contact_name,
         phone: l.phone,
-        am: user?.name || 'unknown',
+        am: amName,
         email: l.email || undefined,
         website: l.website || undefined,
         title: l.title || undefined,
@@ -122,7 +124,7 @@ export default function LeadDetailPage() {
         company_name: lead.company_name,
         client_contact: lead.contact_name,
         phone: lead.phone,
-        am: user?.name || 'unknown',
+        am: lead.assigned_user?.name || user?.name || 'unknown',
         email: lead.email || undefined,
         website: lead.website || undefined,
         title: lead.title || undefined,
