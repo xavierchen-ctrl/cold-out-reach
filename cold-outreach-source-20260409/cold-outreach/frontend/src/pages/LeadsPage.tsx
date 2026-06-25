@@ -1005,9 +1005,6 @@ function ScraperTab({ onImported }: { onImported: () => void }) {
                     <Button variant="outline" size="sm" onClick={() => handlePreview(job.id)}>
                       <Eye className="w-3.5 h-3.5 mr-1" /> 預覽
                     </Button>
-                    <Button size="sm" onClick={() => handleImport(job.id)}>
-                      <Download className="w-3.5 h-3.5 mr-1" /> 匯入名單
-                    </Button>
                   </div>
                 )}
               </div>

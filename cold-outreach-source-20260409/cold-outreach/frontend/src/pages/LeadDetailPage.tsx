@@ -65,6 +65,44 @@ export default function LeadDetailPage() {
   const [noteContent, setNoteContent] = useState('')
   const [hasAddedNote, setHasAddedNote] = useState(false)
   const [ragicSyncing, setRagicSyncing] = useState(false)
+  const [dirty, setDirty] = useState(false)   // 有未儲存的變更
+
+  // 編輯欄位（同時標記為已變更）
+  const setField = (key: string, value: unknown) => {
+    setForm(f => ({ ...f, [key]: value }))
+    setDirty(true)
+  }
+
+  // 離開頁面防呆（重新整理 / 關閉分頁）
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (dirty) { e.preventDefault(); e.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
+
+  const leaveGuard = (action: () => void) => {
+    if (!dirty || confirm('請問您確定要離開此頁面嗎？未儲存的內容將不會保留。')) action()
+  }
+
+  // 儲存後同步到 Ragic 陌開表（best-effort，不阻擋儲存）
+  const syncRagicSilently = async (l: Partial<Lead>) => {
+    if (!l.company_name || !l.contact_name || !l.phone) return
+    try {
+      await ragicUpsertNewClient({
+        company_name: l.company_name,
+        client_contact: l.contact_name,
+        phone: l.phone,
+        am: user?.name || 'unknown',
+        email: l.email || undefined,
+        website: l.website || undefined,
+        title: l.title || undefined,
+        industry: l.industry || undefined,
+        department: l.department || undefined,
+      })
+    } catch { /* 忽略 Ragic 同步錯誤，不影響儲存 */ }
+  }
 
   const handleSyncToRagic = async () => {
     if (!lead) return
@@ -237,6 +275,9 @@ export default function LeadDetailPage() {
 
   const save = async () => {
     if (!id) return
+    // 必填欄位驗證
+    if (!(form.contact_name || '').trim()) { alert('「聯絡人」為必填欄位'); return }
+    if (!(form.department || '').trim()) { alert('「部門」為必填欄位'); return }
     setSaving(true)
     try {
       const payload: Record<string, unknown> = { ...(form as Record<string, unknown>) }
@@ -248,6 +289,8 @@ export default function LeadDetailPage() {
       }
       await updateLead(id, payload)
       setHasAddedNote(false)
+      setDirty(false)
+      await syncRagicSilently({ ...lead, ...form } as Partial<Lead>)
       await loadLead()
     } finally {
       setSaving(false)
@@ -522,11 +565,12 @@ export default function LeadDetailPage() {
       <div className="bg-white border-b px-4 md:px-6 py-4">
         <div className="flex items-center gap-4 mb-3">
           <button
-            onClick={() => navigate('/leads')}
+            onClick={() => leaveGuard(() => navigate('/leads'))}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             <ArrowLeft className="w-4 h-4" /> 返回名單
           </button>
+          {dirty && <span className="text-xs text-amber-600">● 有未儲存變更</span>}
         </div>
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
           <div>
@@ -538,6 +582,16 @@ export default function LeadDetailPage() {
             </p>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <Button
+              size="sm" variant="outline"
+              onClick={() => changeStatus('called_no_answer')}
+              className="border-amber-400 text-amber-700 hover:bg-amber-50"
+            >
+              📵 已撥打未接
+            </Button>
+            <Button size="sm" onClick={save} disabled={saving} className="shadow-sm">
+              {saving ? '儲存中...' : '儲存變更'}
+            </Button>
             <ScoreBadge score={lead.score} />
             <Button size="sm" variant="outline" onClick={handleScore} disabled={scoring}>
               <Star className="w-3.5 h-3.5 md:mr-1.5" />
@@ -1136,21 +1190,24 @@ export default function LeadDetailPage() {
                 { label: '城市', key: 'city' },
                 { label: '公司規模', key: 'company_size' },
                 { label: '來源', key: 'source' },
-              ].map(({ label, key }) => (
+              ].map(({ label, key }) => {
+                const required = key === 'contact_name' || key === 'department'
+                return (
                 <div key={key} className={key === 'company_name' || key === 'website' ? 'col-span-2' : ''}>
-                  <Label className="text-xs">{label}</Label>
+                  <Label className="text-xs">{label}{required && <span className="text-red-500"> *</span>}</Label>
                   <Input
                     value={(form as Record<string, unknown>)[key] as string || ''}
-                    onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
-                    className="h-8 text-sm mt-0.5"
+                    onChange={e => setField(key, e.target.value)}
+                    className={`h-8 text-sm mt-0.5 ${required && !((form as Record<string, unknown>)[key] as string || '').trim() ? 'border-red-300' : ''}`}
                   />
                 </div>
-              ))}
+                )
+              })}
               <div className="col-span-2">
                 <Label className="text-xs">備注</Label>
                 <Textarea
                   value={form.notes || ''}
-                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  onChange={e => setField('notes', e.target.value)}
                   rows={3}
                   className="text-sm mt-0.5"
                 />
