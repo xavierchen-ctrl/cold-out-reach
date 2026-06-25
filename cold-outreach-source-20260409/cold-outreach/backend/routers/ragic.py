@@ -259,8 +259,8 @@ async def sync_to_leads(
             website=_val(row, "官網", 500),
             source=source,
             notes="；".join(notes_parts) or None,
-            # 有接洽人代表已有人在處理 → 認領中；否則新名單
-            status=LeadStatus.claiming if am else LeadStatus.new,
+            # 有接洽人代表已接觸過 → 已聯繫；否則新名單
+            status=LeadStatus.contacted if am else LeadStatus.new,
         )
 
     # 既有客戶優先
@@ -279,12 +279,12 @@ async def sync_to_leads(
         db.add_all(to_add)
         db.commit()
 
-    # 回補：既有 Ragic 名單若有接洽人但仍為「新名單」→ 改「認領中」
+    # 回補：既有 Ragic 名單若有接洽人但仍為「新名單/認領中」→ 改「已聯繫」
     backfilled = db.query(Lead).filter(
         Lead.source.in_(["ragic_既有客戶", "ragic_陌開"]),
-        Lead.status == LeadStatus.new,
+        Lead.status.in_([LeadStatus.new, LeadStatus.claiming]),
         Lead.notes.ilike("%Ragic 接洽人：%"),
-    ).update({Lead.status: LeadStatus.claiming}, synchronize_session=False)
+    ).update({Lead.status: LeadStatus.contacted}, synchronize_session=False)
     db.commit()
 
     return {
