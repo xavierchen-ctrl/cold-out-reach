@@ -138,48 +138,85 @@ async def upsert_new_client(
     return await _post("edit_new_client_table", body.model_dump())
 
 
+import asyncio
+import time
+
+_CACHE_TTL = 300  # 5 分鐘
+_existing_cache = None
+_existing_cache_time = 0.0
+_new_cache = None
+_new_cache_time = 0.0
+_cache_lock = asyncio.Lock()
+
+
+async def _get_cached_tables():
+    global _existing_cache, _existing_cache_time, _new_cache, _new_cache_time
+    async with _cache_lock:
+        now = time.time()
+        if not _existing_cache or (now - _existing_cache_time > _CACHE_TTL):
+            logger.info("Ragic existing clients cache expired or empty, fetching from Middle Platform...")
+            _existing_cache = await _post("get_existing_client_table", {})
+            _existing_cache_time = now
+        if not _new_cache or (now - _new_cache_time > _CACHE_TTL):
+            logger.info("Ragic new clients cache expired or empty, fetching from Middle Platform...")
+            _new_cache = await _post("get_new_client_table", {})
+            _new_cache_time = now
+        return _existing_cache, _new_cache
+
+
 @router.post("/bulk-check")
 async def bulk_check_companies(
     body: BulkCheckReq,
     current_user: User = Depends(get_current_user),
 ):
     """
-    批次檢查：給一串公司名稱，回報每家是否已存在於 既有客戶表 或 陌開表
-    回傳結構：[{ company_name, in_existing, in_new, existing_am, new_am }]
-    用於 CSV/爬蟲匯入前的去重提示。
+    優化後的批次檢查：
+    一次拉取完整的既有客戶表與陌開表（具備 5 分鐘快取），並在記憶體中利用正規化名稱進行極速 O(1) 比對。
     """
-    import asyncio
+    try:
+        existing_data, new_data = await _get_cached_tables()
+    except Exception as e:
+        logger.warning(f"Ragic 中台連線失敗: {e}")
+        raise HTTPException(status_code=502, detail=f"Ragic 中台連線失敗: {e}")
 
-    async def _check_one(name: str) -> dict:
+    existing_rows = existing_data.get("data") or []
+    new_rows = new_data.get("data") or []
+
+    # 建立記憶體正規化對照 Map
+    existing_map = {}
+    for r in existing_rows:
+        comp_name = r.get("公司")
+        if comp_name:
+            norm = _norm_company(comp_name)
+            if norm:
+                existing_map[norm] = r
+
+    new_map = {}
+    for r in new_rows:
+        comp_name = r.get("公司")
+        if comp_name:
+            norm = _norm_company(comp_name)
+            if norm:
+                new_map[norm] = r
+
+    results = []
+    for name in body.company_names:
         if not name or not name.strip():
-            return {"company_name": name, "in_existing": False, "in_new": False}
-        try:
-            existing_task = _post("get_existing_client_table", {"company_name": name})
-            new_task = _post("get_new_client_table", {"company_name": name})
-            existing, new = await asyncio.gather(existing_task, new_task, return_exceptions=True)
-        except Exception as e:
-            logger.warning(f"bulk-check error {name!r}: {e}")
-            return {"company_name": name, "in_existing": False, "in_new": False, "error": str(e)}
+            results.append({"company_name": name, "in_existing": False, "in_new": False})
+            continue
 
-        existing_rows = [] if isinstance(existing, Exception) else existing.get("data", [])
-        new_rows = [] if isinstance(new, Exception) else new.get("data", [])
+        norm = _norm_company(name)
+        existing_row = existing_map.get(norm)
+        new_row = new_map.get(norm)
 
-        return {
+        results.append({
             "company_name": name,
-            "in_existing": len(existing_rows) > 0,
-            "in_new": len(new_rows) > 0,
-            "existing_am": existing_rows[0].get("接洽人") if existing_rows else None,
-            "new_am": new_rows[0].get("接洽人") if new_rows else None,
-        }
+            "in_existing": existing_row is not None,
+            "in_new": new_row is not None,
+            "existing_am": existing_row.get("接洽人") if existing_row else None,
+            "new_am": new_row.get("接洽人") if new_row else None,
+        })
 
-    # 限制併發避免壓垮中台 (10 同時)
-    sem = asyncio.Semaphore(10)
-
-    async def _wrapped(name: str):
-        async with sem:
-            return await _check_one(name)
-
-    results = await asyncio.gather(*[_wrapped(n) for n in body.company_names])
     return {"results": results}
 
 

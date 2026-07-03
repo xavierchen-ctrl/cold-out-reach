@@ -117,11 +117,11 @@ export default function ScraperJobPage() {
     setBulkFinding(false)
   }
 
-  const handleRagicCheck = async () => {
-    if (companies.length === 0) return
+  const performRagicCheck = async (targetCompanies: typeof companies) => {
+    if (targetCompanies.length === 0) return
     setRagicChecking(true)
     try {
-      const names = companies.map(c => c.company_name).filter(Boolean)
+      const names = targetCompanies.map(c => c.company_name).filter(Boolean)
       const res = await ragicBulkCheck(names)
       const next = new Map<string, 'existing' | 'new'>()
       for (const r of res.data.results) {
@@ -130,20 +130,25 @@ export default function ScraperJobPage() {
       }
       setRagicStatus(next)
     } catch (e: unknown) {
-      const err = e as { response?: { data?: { detail?: string } } }
-      alert(err?.response?.data?.detail || 'Ragic 檢查失敗')
+      console.error('自動 Ragic 檢查失敗', e)
     } finally {
       setRagicChecking(false)
     }
   }
+
+  const handleRagicCheck = () => performRagicCheck(companies)
 
   useEffect(() => {
     if (!id) return
     const fetchJob = async () => {
       try {
         const res = await previewScraperJob(id)
-        setCompanies(res.data.companies || [])
-        loadDevStatus(res.data.companies || [])
+        const comps = res.data.companies || []
+        setCompanies(comps)
+        loadDevStatus(comps)
+        if (comps.length > 0) {
+          performRagicCheck(comps)
+        }
       } catch (err: any) {
         setError(err?.response?.data?.detail || '無法取得任務資料，或任務尚未完成')
       } finally {
