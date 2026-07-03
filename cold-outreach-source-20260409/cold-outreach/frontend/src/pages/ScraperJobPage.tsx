@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ragicBulkCheck, ImportConflict, developScrapedLead, getScraperDevelopStatus } from '@/lib/api'
+import { previewScraperJob, importScraperJob, findCompanyWebsite, findCompanyPhone, updateScraperJobField, ImportConflict, developScrapedLead, getScraperDevelopStatus } from '@/lib/api'
 import ConflictReviewDialog from '@/components/ConflictReviewDialog'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, Download, Building2, UserCircle2, Mail, Phone, MapPin, Briefcase, Search, Loader2, Database, Globe } from 'lucide-react'
@@ -29,6 +29,8 @@ interface ScrapedCompany {
   likes?: number
   reposts?: number
   replies?: number
+  // Ragic 狀態
+  ragic_status?: 'existing' | 'new' | null
 }
 
 export default function ScraperJobPage() {
@@ -47,9 +49,6 @@ export default function ScraperJobPage() {
   const [findingPhone, setFindingPhone] = useState<Set<number>>(new Set())
   const [bulkFinding, setBulkFinding] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 })
-  // Ragic 重複檢查：company_name -> 'existing' | 'new' | 'none'
-  const [ragicStatus, setRagicStatus] = useState<Map<string, 'existing' | 'new'>>(new Map())
-  const [ragicChecking, setRagicChecking] = useState(false)
   // 開發中狀態：company_norm -> { developer_name, mine }
   const [devMap, setDevMap] = useState<Map<string, { developer_name: string; mine: boolean }>>(new Map())
   const [claiming, setClaiming] = useState<Set<number>>(new Set())
@@ -117,27 +116,6 @@ export default function ScraperJobPage() {
     setBulkFinding(false)
   }
 
-  const performRagicCheck = async (targetCompanies: typeof companies) => {
-    if (targetCompanies.length === 0) return
-    setRagicChecking(true)
-    try {
-      const names = targetCompanies.map(c => c.company_name).filter(Boolean)
-      const res = await ragicBulkCheck(names)
-      const next = new Map<string, 'existing' | 'new'>()
-      for (const r of res.data.results) {
-        if (r.in_existing) next.set(r.company_name, 'existing')
-        else if (r.in_new) next.set(r.company_name, 'new')
-      }
-      setRagicStatus(next)
-    } catch (e: unknown) {
-      console.error('自動 Ragic 檢查失敗', e)
-    } finally {
-      setRagicChecking(false)
-    }
-  }
-
-  const handleRagicCheck = () => performRagicCheck(companies)
-
   useEffect(() => {
     if (!id) return
     const fetchJob = async () => {
@@ -146,9 +124,6 @@ export default function ScraperJobPage() {
         const comps = res.data.companies || []
         setCompanies(comps)
         loadDevStatus(comps)
-        if (comps.length > 0) {
-          performRagicCheck(comps)
-        }
       } catch (err: any) {
         setError(err?.response?.data?.detail || '無法取得任務資料，或任務尚未完成')
       } finally {
@@ -308,18 +283,6 @@ export default function ScraperJobPage() {
             <>
               <Button
                 variant="outline"
-                onClick={handleRagicCheck}
-                disabled={ragicChecking || companies.length === 0}
-                className="shadow-sm"
-                title="批次查詢 Ragic 既有客戶 / 陌開表"
-              >
-                {ragicChecking
-                  ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Ragic 檢查中</>
-                  : <><Database className="w-4 h-4 mr-2" />檢查 Ragic 重複{ragicStatus.size > 0 ? ` (${ragicStatus.size})` : ''}</>
-                }
-              </Button>
-              <Button
-                variant="outline"
                 onClick={handleBulkFindPhone}
                 disabled={bulkFinding || companies.filter(c => !c.phone).length === 0}
                 className="shadow-sm"
@@ -452,10 +415,10 @@ export default function ScraperJobPage() {
                             <div>
                               <div className="font-semibold text-gray-900 leading-tight flex items-center gap-1.5 flex-wrap">
                                 {c.company_name}
-                                {ragicStatus.get(c.company_name) === 'existing' && (
+                                {c.ragic_status === 'existing' && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-normal" title="已在 Ragic 既有客戶表">既有客戶</span>
                                 )}
-                                {ragicStatus.get(c.company_name) === 'new' && (
+                                {c.ragic_status === 'new' && (
                                   <span className="text-[10px] px-1.5 py-0.5 rounded bg-orange-100 text-orange-700 font-normal" title="已在 Ragic 陌開表">陌開中</span>
                                 )}
                                 {dev && (

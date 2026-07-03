@@ -812,7 +812,7 @@ def list_jobs(
 
 
 @router.get("/preview/{job_id}")
-def preview_job(
+async def preview_job(
     job_id: UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -823,6 +823,39 @@ def preview_job(
     if job.status != ScraperJobStatus.done:
         raise HTTPException(status_code=400, detail=f"Job is {job.status.value}, not done yet")
     companies = json.loads(job.result_json or "[]")
+
+    # 批次查詢 Ragic 既有與新客戶表，並將結果直接標記在公司名單中
+    try:
+        from routers.ragic import _get_cached_tables, _norm_company
+        existing_data, new_data = await _get_cached_tables()
+        existing_rows = existing_data.get("data") or []
+        new_rows = new_data.get("data") or []
+
+        existing_map = {
+            _norm_company(r.get("公司")): r
+            for r in existing_rows
+            if r.get("公司") and _norm_company(r.get("公司"))
+        }
+        new_map = {
+            _norm_company(r.get("公司")): r
+            for r in new_rows
+            if r.get("公司") and _norm_company(r.get("公司"))
+        }
+
+        for c in companies:
+            name = c.get("company_name") or ""
+            norm = _norm_company(name)
+            if norm in existing_map:
+                c["ragic_status"] = "existing"
+            elif norm in new_map:
+                c["ragic_status"] = "new"
+            else:
+                c["ragic_status"] = None
+    except Exception as e:
+        logger.warning(f"Preview automated Ragic check failed: {e}")
+        for c in companies:
+            c["ragic_status"] = None
+
     return {"count": len(companies), "companies": companies}
 
 
