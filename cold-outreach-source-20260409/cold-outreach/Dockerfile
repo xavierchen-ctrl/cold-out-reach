@@ -28,6 +28,9 @@ RUN playwright install chromium
 
 COPY backend/ ./
 
+# Clean up any stale static assets that came from the copy of the backend directory
+RUN rm -rf ./static
+
 # Replace any stale bundled frontend with the freshly built one
 COPY --from=frontend /fe/dist ./static
 
